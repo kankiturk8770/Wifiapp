@@ -146,6 +146,84 @@ class AppState(private val app: Application, transport: Transport?) : AndroidVie
         }
     }
 
+    // ---------------- best band test ----------------
+
+    val bandResults = mutableStateListOf<BandResult>()
+    var bandTestRunning by mutableStateOf(false)
+    var bandTestStep by mutableStateOf("")
+    var bandTestProgress by mutableStateOf(0f)
+    private var bandJob: Job? = null
+
+    /**
+     * Locks the modem to each band in turn, waits until it is really on it, then measures signal,
+     * ping (with jitter and loss) and, if asked, a short download. All bands are turned back on at
+     * the end, also when it is stopped or fails.
+     */
+    fun startBandTest(bands: List<String>, restore: List<String>, withSpeed: Boolean, onDone: () -> Unit) {
+        if (bandTestRunning) return
+        bandResults.clear()
+        bandJob = viewModelScope.launch {
+            bandTestRunning = true
+            val net = (api.net as? HttpTransport)?.wifiNetwork()
+            try {
+                bands.forEachIndexed { i, b ->
+                    val name = bandName(b)
+                    fun step(t: String, part: Float) { bandTestStep = "$name: $t"; bandTestProgress = (i + part) / bands.size }
+                    step("قفل کردن مودم روی این باند…", 0f)
+                    if (io { setBands(listOf(b)) }.getOrNull() != true) {
+                        bandResults += BandResult(b, false, note = "مودم قفل را قبول نکرد"); return@forEachIndexed
+                    }
+                    // Wait until the modem says it is on this band and the internet is back (up to 50 s).
+                    var reached = false
+                    var confirmed = false
+                    for (w in 0 until 50) {
+                        delay(1000)
+                        step("صبر برای وصل شدن (${w + 1} ثانیه)", 0.1f + 0.4f * w / 50)
+                        val st = io { get("ppp_status,signalbar") }.getOrNull() ?: continue
+                        val res = io { band() }.getOrDefault("")
+                        val num = BandProbe.residentNumber(res)
+                        val on = st.optString("ppp_status") == "ppp_connected"
+                        if (on && num != null && num == BandProbe.bandNumber(b) && BandProbe.isLte(res) == b.startsWith("LTE")) { reached = true; confirmed = true; break }
+                        // Some firmware does not name the band: then trust the lock after a while.
+                        if (on && res.isEmpty() && w >= 12) { reached = true; break }
+                    }
+                    if (!reached) { bandResults += BandResult(b, false, note = "این باند اینجا آنتن ندارد"); return@forEachIndexed }
+                    step("اندازه گرفتن آنتن…", 0.55f)
+                    delay(2500)
+                    val sig = (0 until 3).mapNotNull {
+                        delay(800)
+                        io { get("lte_rsrp,rssi,signalbar,detail_cell_sinr,detail_cell_rsrq,sinr,rsrq,lte_snr") }.getOrNull()
+                    }
+                    fun avg(vararg keys: String): Double? = sig.mapNotNull { j -> keys.firstNotNullOfOrNull { k -> j.optString(k).toDoubleOrNull() } }.takeIf { it.isNotEmpty() }?.average()
+                    step("پینگ (۲۰ بار)…", 0.65f)
+                    val (ping, jitter, loss) = withContext(Dispatchers.IO) { BandProbe.pingSeries(net) }
+                    val mbps = if (withSpeed) { step("تست سرعت…", 0.85f); withContext(Dispatchers.IO) { BandProbe.speed(net) } } else null
+                    bandResults += BandResult(
+                        b, true,
+                        rsrp = avg("lte_rsrp")?.toInt(), sinr = avg("detail_cell_sinr", "sinr", "lte_snr"), rsrq = avg("detail_cell_rsrq", "rsrq"),
+                        bars = avg("signalbar")?.toInt(), ping = ping, jitter = jitter, loss = loss, mbps = mbps,
+                        note = if (confirmed) "" else "مودم اسم باند را نگفت",
+                    )
+                }
+                bandTestStep = "تمام شد"
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                bandTestStep = "متوقف شد"
+                throw e
+            } finally {
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    bandTestStep = "روشن کردن دوبارهٔ همهٔ باندها…"
+                    io { setBands(restore) }
+                    bandTestRunning = false
+                    bandTestProgress = 1f
+                    if (bandTestStep.startsWith("روشن")) bandTestStep = "تمام شد؛ همهٔ باندها دوباره روشن شدند"
+                    onDone()
+                }
+            }
+        }
+    }
+
+    fun stopBandTest() { bandJob?.cancel() }
+
     /** A small change with no spinner and no message (e.g. marking an SMS read). */
     fun quiet(block: ModemApi.() -> Unit) { viewModelScope.launch { io(block) } }
 

@@ -359,3 +359,22 @@ class SdPathTest {
         assertEquals("/mmc2/My%20Music/%D8%B3%D9%84%D8%A7%D9%85.mp3", sdUrlPath("/mmc2/My Music", "سلام.mp3"))
     }
 }
+
+class BandTestTest {
+    @Test fun bandNumbers() {
+        assertEquals(1, BandProbe.residentNumber("LTE Band1"))
+        assertEquals(20, BandProbe.residentNumber("LTE BAND 20"))
+        assertEquals(3, BandProbe.bandNumber("LTEB3"))
+        assertEquals(1, BandProbe.bandNumber("WB1"))
+        assertEquals(true, BandProbe.isLte("LTE Band7"))
+        assertEquals(false, BandProbe.isLte("WCDMA Band1"))
+        assertEquals("باند 3 (" + Codec.iso("1800 MHz") + ")", bandName("LTEB3"))
+    }
+
+    @Test fun lossCostsMoreThanPing() {
+        val steady = BandResult("LTEB1", true, ping = 60.0, jitter = 3.0, loss = 0.0)
+        val jumpy = BandResult("LTEB3", true, ping = 45.0, jitter = 12.0, loss = 2.0)
+        assertEquals(listOf("LTEB1", "LTEB3"), listOf(jumpy, steady).sortedBy { it.score }.map { it.band })
+        assertEquals(null, BandResult("LTEB7", false).score)
+    }
+}

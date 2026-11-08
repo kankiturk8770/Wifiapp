@@ -16,6 +16,9 @@ class HttpTransport(ctx: Context) : Transport, Uploader {
     private val cm = ctx.getSystemService(ConnectivityManager::class.java)
     private val cookies = linkedMapOf<String, String>()
 
+    /** The Wi-Fi network the modem is on (tests that go through the modem use it too). */
+    fun wifiNetwork(): Network? = wifi()
+
     @Suppress("DEPRECATION")
     private fun wifi(): Network? = cm.allNetworks.firstOrNull {
         cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true

@@ -655,6 +655,13 @@ val ALL_BANDS = listOf(
     "GSM850", "GSM900", "GSM1800", "GSM1900", "WB1", "WB2", "WB3", "WB4", "WB5", "WB8",
 )
 
+/** "LTEB3" -> "باند ۳ (1800 MHz)"; "WB1" -> "3G باند ۱ (2100 MHz)". */
+fun bandName(b: String): String = when {
+    b.startsWith("LTEB") -> "باند ${b.removePrefix("LTEB")}"
+    b.startsWith("WB") -> "3G باند ${b.removePrefix("WB")}"
+    else -> "GSM"
+} + " (" + Codec.iso("${BAND_MHZ[b] ?: "?"} MHz") + ")"
+
 /** MHz of each band, so a person knows what they turn off. */
 val BAND_MHZ = mapOf(
     "LTEB1" to "2100", "LTEB2" to "1900", "LTEB3" to "1800", "LTEB4" to "1700/2100", "LTEB5" to "850", "LTEB6" to "850", "LTEB7" to "2600",

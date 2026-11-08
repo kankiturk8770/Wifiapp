@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.ui.graphics.Color
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.material.icons.filled.Sms
@@ -1203,31 +1206,140 @@ private fun GuestPage(st: AppState, back: () -> Unit) {
 private fun BandPage(st: AppState, back: () -> Unit) {
     var ask by remember { mutableStateOf(false) }
     SubPage("انتخاب باند", back, "مودم فقط روی باندهای تیک‌خورده وصل می‌شود. اگر نمی‌دانی، همه را روشن بگذار.") {
-        NeedsOffline(st)
         Load(st, 0, { bands() }) { (all, chosen), reload ->
             if (all.isEmpty()) { Empty("مودم فهرست باند نداد."); return@Load }
+            BandTester(st, all, chosen, reload)
             val on = remember(chosen) { mutableStateListOf<String>().apply { addAll(chosen) } }
-            fun label(b: String) = when {
-                b.startsWith("LTEB") -> "باند ${b.removePrefix("LTEB")}"
-                b.startsWith("WB") -> "باند ${b.removePrefix("WB")}"
-                else -> "GSM"
-            } + " (${BAND_MHZ[b] ?: "?"} MHz)"
             listOf("4G" to all.filter { it.startsWith("LTE") }, "3G و 2G" to all.filter { !it.startsWith("LTE") }).forEach { (title, list) ->
                 if (list.isNotEmpty()) Group(title = title) {
                     list.forEachIndexed { i, b ->
                         if (i > 0) Divider()
-                        SwitchRow(label(b), null, b in on) { v -> if (v) on += b else on -= b }
+                        SwitchRow(bandName(b), null, b in on, enabled = !st.bandTestRunning) { v -> if (v) on += b else on -= b }
                     }
                 }
             }
-            GhostButton("همه") { on.clear(); on.addAll(all) }
-            MainButton("ذخیره", enabled = on.isNotEmpty()) { ask = true }
+            GhostButton("همه", enabled = !st.bandTestRunning) { on.clear(); on.addAll(all) }
+            MainButton("ذخیره", enabled = on.isNotEmpty() && !st.bandTestRunning) { ask = true }
             if (on.none { it.startsWith("LTE") }) Text("هیچ باند 4G روشن نیست؛ مودم فقط 3G یا 2G می‌گیرد.", color = K.warn, fontSize = 13.sp)
             if (ask) Ask("ذخیره شود؟", "اتصال مودم چند لحظه قطع و دوباره وصل می‌شود.", "ذخیره کن",
                 onYes = { st.run("ذخیره شد", then = reload) { setBands(all.filter { it in on }) } }, onNo = { ask = false })
         }
     }
 }
+
+/** "Best band for games": lock each 4G band in turn and measure it, right on the band page. */
+@Composable
+private fun BandTester(st: AppState, all: List<String>, chosen: List<String>, reload: () -> Unit) {
+    val lte = all.filter { it.startsWith("LTE") }
+    if (lte.isEmpty()) return
+    var start by remember { mutableStateOf(false) }
+    var speed by remember { mutableStateOf(true) }
+    var lock by remember { mutableStateOf<String?>(null) }
+    val res = st.bandResults
+    val ranked = res.filter { it.reached && it.score != null }.sortedBy { it.score }
+    val best = ranked.firstOrNull()?.band
+    Group(title = "بهترین باند برای بازی", footer = if (st.bandTestRunning) null else
+        "مودم را یکی‌یکی روی هر باند 4G قفل می‌کند و پینگ، لرزش، افت، آنتن و سرعت را می‌سنجد (۳ تا ۶ دقیقه). اینترنت در این مدت چند بار قطع و وصل می‌شود؛ وسط بازی نزن. آخر کار همهٔ باندها خودشان دوباره روشن می‌شوند. نتیجه برای همین جا و همین ساعت است.") {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (st.bandTestRunning || st.bandTestStep.isNotEmpty()) {
+                Text(st.bandTestStep, color = if (st.bandTestRunning) K.text else K.good, fontSize = 13.sp)
+                if (st.bandTestRunning) androidx.compose.material3.LinearProgressIndicator(
+                    progress = { st.bandTestProgress }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    color = K.blue, trackColor = K.line, drawStopIndicator = {},
+                )
+            }
+            if (st.bandTestRunning) {
+                GhostButton("توقف (باندها دوباره روشن می‌شوند)", color = K.bad) { st.stopBandTest() }
+            } else {
+                MainButton(if (res.isEmpty()) "شروع تست ${lte.size} باند" else "تست دوباره", icon = Icons.Filled.Speed) { start = true }
+            }
+        }
+        if (!st.bandTestRunning) {
+            Divider()
+            SwitchRow("تست سرعت هم بگیرد", "حدود ۳ مگ اینترنت برای هر باند", speed) { speed = it }
+        }
+    }
+    if (res.isNotEmpty()) {
+        val order = ranked + res.filter { it !in ranked }
+        order.forEach { r -> BandCard(r, r.band == best, ranked.indexOf(r).takeIf { it >= 0 }?.plus(1), enabled = !st.bandTestRunning) { lock = r.band } }
+        if (!st.bandTestRunning && res.size > 1) GhostButton("همهٔ باندها روشن", Icons.Filled.Refresh) {
+            st.run("همهٔ باندها روشن شد", then = reload) { setBands(all) }
+        }
+    }
+    if (start) Ask("تست شروع شود؟", "حدود ${lte.size} دقیقه طول می‌کشد و اینترنت مودم چند بار قطع و وصل می‌شود.", "شروع کن",
+        onYes = {
+            start = false
+            // Put back what the person had (if it had any 4G), else all bands.
+            val restore = if (chosen.any { it.startsWith("LTE") }) chosen else all
+            st.startBandTest(lte, restore, speed) { reload() }
+        }, onNo = { start = false })
+    lock?.let { b ->
+        Ask("قفل روی ${bandName(b)}؟", "مودم فقط روی همین باند وصل می‌شود. اگر جای دیگری رفتی و آنتن نداد، از همین صفحه «همهٔ باندها روشن» را بزن.", "قفل کن",
+            onYes = { lock = null; st.run("روی ${bandName(b)} قفل شد", then = reload) { setBands(listOf(b)) } }, onNo = { lock = null })
+    }
+}
+
+@Composable
+private fun BandCard(r: BandResult, best: Boolean, rank: Int?, enabled: Boolean, onLock: () -> Unit) {
+    val border = if (best) K.good else K.line
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(K.card)
+            .then(Modifier.border(if (best) 1.5.dp else 1.dp, border, RoundedCornerShape(18.dp)))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.clip(RoundedCornerShape(10.dp)).background(if (best) K.good.copy(alpha = .18f) else K.raised).padding(horizontal = 10.dp, vertical = 4.dp)) {
+                Text(rank?.toString() ?: "–", color = if (best) K.good else K.dim, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(bandName(r.band), color = K.text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                val sub = when {
+                    best -> "بهترین برای بازی"
+                    !r.reached -> r.note
+                    else -> r.note
+                }
+                if (sub.isNotEmpty()) Text(sub, color = if (best) K.good else if (!r.reached) K.bad else K.dim, fontSize = 12.sp)
+            }
+            if (r.reached) TextButton(onClick = onLock, enabled = enabled) { Text("قفل روی این", color = if (enabled) K.ice else K.dim, fontSize = 13.sp) }
+        }
+        if (r.reached) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Metric("پینگ", r.ping?.let { "${it.toInt()}" }, "ms", pingColor(r.ping), Modifier.weight(1f))
+                Metric("لرزش", r.jitter?.let { "${it.toInt()}" }, "ms", jitterColor(r.jitter), Modifier.weight(1f))
+                Metric("افت", r.loss?.let { if (it == 0.0) "0" else "%.0f".format(it) }, "%", lossColor(r.loss), Modifier.weight(1f))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Metric("آنتن", r.rsrp?.toString(), "dBm", rsrpColor(r.rsrp), Modifier.weight(1f))
+                Metric("کیفیت", r.sinr?.let { "%.0f".format(it) }, "dB", sinrColor(r.sinr), Modifier.weight(1f))
+                Metric("سرعت", r.mbps?.let { if (it >= 10) "${it.toInt()}" else "%.1f".format(it) }, "Mbps", K.ice, Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun Metric(label: String, value: String?, unit: String, color: Color, modifier: Modifier) {
+    Column(
+        modifier.clip(RoundedCornerShape(12.dp)).background(K.raised).padding(vertical = 8.dp, horizontal = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(label, color = K.dim, fontSize = 11.sp)
+        Ltr {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(value ?: "—", color = if (value == null) K.dim else color, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                if (value != null) Text(" $unit", color = K.dim, fontSize = 10.sp, modifier = Modifier.padding(bottom = 2.dp))
+            }
+        }
+    }
+}
+
+private fun pingColor(v: Double?) = when { v == null -> K.dim; v < 60 -> K.good; v < 110 -> K.warn; else -> K.bad }
+private fun jitterColor(v: Double?) = when { v == null -> K.dim; v < 10 -> K.good; v < 30 -> K.warn; else -> K.bad }
+private fun lossColor(v: Double?) = when { v == null -> K.dim; v < 1 -> K.good; v < 5 -> K.warn; else -> K.bad }
+private fun rsrpColor(v: Int?) = when { v == null -> K.dim; v >= -95 -> K.good; v >= -110 -> K.warn; else -> K.bad }
+private fun sinrColor(v: Double?) = when { v == null -> K.dim; v >= 13 -> K.good; v >= 3 -> K.warn; else -> K.bad }
 
 @Composable
 private fun VpnPage(st: AppState, back: () -> Unit) = SubPage("VPN مودم", back, "خود مودم به یک سرور L2TP یا PPTP وصل می‌شود و همهٔ دستگاه‌ها از آن رد می‌شوند.") {

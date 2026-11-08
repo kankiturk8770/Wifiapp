@@ -164,6 +164,13 @@ class Shots {
     @Test fun pageLang() = page("lang")
     @Test fun pageGuest() = page("guest")
     @Test fun pageBands() = page("bands")
+    @Test fun pageBandsTested() = shot(state().apply {
+        bandResults += BandResult("LTEB1", true, rsrp = -97, sinr = 14.0, ping = 48.0, jitter = 4.2, loss = 0.0, mbps = 21.4)
+        bandResults += BandResult("LTEB3", true, rsrp = -88, sinr = 6.0, ping = 61.0, jitter = 15.0, loss = 5.0, mbps = 34.0)
+        bandResults += BandResult("LTEB7", false, note = "این باند اینجا آنتن ندارد")
+        bandTestStep = "تمام شد؛ همهٔ باندها دوباره روشن شدند"
+        open("bands")
+    })
     @Test fun pageVpn() = page("vpn")
     @Test fun pageUrl() = page("urlfilter")
     @Test fun pageApStation() = page("apstation")
