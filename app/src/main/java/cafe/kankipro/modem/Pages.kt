@@ -1337,7 +1337,8 @@ private fun UsbMacPage(st: AppState, back: () -> Unit) = SubPage("MAC کارت U
 
 // ---------------- AP Station ----------------
 
-private val STA_AUTH = listOf("OPEN" to "بدون رمز", "WPA2PSK" to "WPA2", "WPAPSKWPA2PSK" to "WPA / WPA2", "WPAPSK" to "WPA")
+private val STA_AUTH = listOf("OPEN" to "باز (بدون رمز یا WEP)", "SHARED" to "WEP اشتراکی", "WPAPSK" to "WPA", "WPA2PSK" to "WPA2", "WPAPSKWPA2PSK" to "WPA / WPA2")
+private val STA_CIPHER = listOf("TKIP" to "TKIP", "CCMP" to "AES (CCMP)", "TKIPCCMP" to "TKIP + AES")
 
 @Composable
 private fun ApStationPage(st: AppState, back: () -> Unit) {
@@ -1410,20 +1411,32 @@ private fun ApStationPage(st: AppState, back: () -> Unit) {
         var ssid by remember(h) { mutableStateOf(h.ssid) }
         var auth by remember(h) { mutableStateOf(h.authMode.ifEmpty { "WPA2PSK" }) }
         var pass by remember(h) { mutableStateOf(h.password) }
+        var cipher by remember(h) { mutableStateOf(h.encryptType.takeIf { it in STA_CIPHER.map { c -> c.first } } ?: "TKIPCCMP") }
+        var wep by remember(h) { mutableStateOf(h.encryptType == "WEP") }
+        var key by remember(h) { mutableStateOf(h.keyID.ifEmpty { "0" }) }
+        val wpa = auth == "WPAPSK" || auth == "WPA2PSK" || auth == "WPAPSKWPA2PSK"
+        val usesWep = auth == "SHARED" || (auth == "OPEN" && wep)
+        // WEP keys are 5 or 13 letters (or 10 / 26 hex); WPA is 8 to 63.
+        val passOk = when { wpa -> pass.length in 8..63; usesWep -> pass.length in listOf(5, 10, 13, 26); else -> true }
         AlertDialog(
             onDismissRequest = { edit = null },
             title = { Text(if (h.profileName.isEmpty()) "وای‌فای تازه" else "ویرایش ${h.ssid}") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Field("اسم وای‌فای", ssid, { ssid = it.take(32) })
                     Choice("امنیت", STA_AUTH.let { l -> if (l.none { it.first == auth }) l + (auth to auth) else l }, auth) { auth = it }
-                    if (auth != "OPEN") Field("رمز", pass, { pass = it.take(63) }, password = true, ltr = true, error = pass.isNotEmpty() && pass.length < 8)
+                    if (auth == "OPEN") Choice("رمزنگاری", listOf("NONE" to "هیچ", "WEP" to "WEP"), if (wep) "WEP" else "NONE") { wep = it == "WEP" }
+                    if (wpa) Choice("رمزنگاری", STA_CIPHER, cipher) { cipher = it }
+                    if (usesWep) Choice("کلید WEP", (0..3).map { "$it" to "کلید ${it + 1}" }, key) { key = it }
+                    if (wpa || usesWep) Field("رمز", pass, { pass = it.take(63) }, password = true, ltr = true, error = pass.isNotEmpty() && !passOk,
+                        hint = if (usesWep) "۵ یا ۱۳ حرف" else "۸ تا ۶۳ حرف")
                 }
             },
             confirmButton = {
-                TextButton(enabled = ssid.isNotEmpty() && (auth == "OPEN" || pass.length >= 8), onClick = {
+                TextButton(enabled = ssid.isNotEmpty() && passOk, onClick = {
                     edit = null
-                    val n = h.copy(ssid = ssid, authMode = auth, password = if (auth == "OPEN") "" else pass, encryptType = if (auth == "OPEN") "NONE" else h.encryptType.takeIf { it != "NONE" && it.isNotEmpty() } ?: "TKIPCCMP",
+                    val enc = when { wpa -> cipher; usesWep -> "WEP"; else -> "NONE" }
+                    val n = h.copy(ssid = ssid, authMode = auth, password = if (wpa || usesWep) pass else "", encryptType = enc, keyID = if (usesWep) key else "0",
                         mac = if (ssid != h.ssid) "0F:00:00:00:00:00" else h.mac)
                     st.run("ذخیره شد", then = { ver++ }) { saveHotspot(n, hotspots()) }
                 }) { Text("ذخیره", color = K.ice) }
@@ -1443,7 +1456,7 @@ private val WEEK = listOf("یکشنبه", "دوشنبه", "سه‌شنبه", "چ
 private fun ParentalPage(st: AppState, back: () -> Unit) {
     var ver by remember { mutableIntStateOf(0) }
     var addSite by remember { mutableStateOf(false) }
-    SubPage("کنترل والدین", back, "برای دستگاه بچه‌ها: فقط در ساعت‌های انتخاب‌شده اینترنت دارند و فقط سایت‌های فهرست سفید باز می‌شوند.") {
+    SubPage("کنترل والدین", back, "برای دستگاه بچه‌ها: در ساعت‌های بسته اینترنت ندارند و فقط سایت‌های فهرست سفید باز می‌شوند.") {
         Load(st, ver, { Triple(childDevices(), devices(), timeLimits()) to whiteSites() }) { (t, sites), _ ->
             val (kids, all, times) = t
             val me = st.status.s("client_mac_address")
@@ -1472,7 +1485,7 @@ private fun ParentalPage(st: AppState, back: () -> Unit) {
                 }
             }
             val grid = remember(times) { mutableStateMapOf<Int, Set<Int>>().apply { putAll(times) } }
-            Group(title = "ساعت‌های مجاز اینترنت", footer = "خانه‌های آبی یعنی آن ساعت اینترنت دارند. روی هر خانه بزن تا عوض شود؛ روی اسم روز بزن تا کل روز عوض شود.") {
+            Group(title = "ساعت‌های بسته", footer = "خانه‌های قرمز یعنی آن ساعت اینترنت بسته است؛ بقیه آزاد. روی هر خانه بزن تا عوض شود؛ روی اسم روز بزن تا کل روز عوض شود.") {
                 Column(Modifier.padding(10.dp)) {
                     Ltr {
                         Row(Modifier.fillMaxWidth()) {
@@ -1489,7 +1502,7 @@ private fun ParentalPage(st: AppState, back: () -> Unit) {
                                     val on = grid[day]?.contains(h) == true
                                     Box(
                                         Modifier.weight(1f).height(22.dp).padding(1.dp).clip(RoundedCornerShape(3.dp))
-                                            .background(if (on) K.blue else K.line)
+                                            .background(if (on) K.bad else K.line)
                                             .clickable { grid[day] = (grid[day] ?: emptySet()).let { if (on) it - h else it + h } },
                                     )
                                 }
@@ -1498,7 +1511,7 @@ private fun ParentalPage(st: AppState, back: () -> Unit) {
                     }
                 }
             }
-            MainButton("ذخیرهٔ ساعت‌ها") { st.run("ذخیره شد", then = { ver++ }) { saveTimeLimits(grid.toMap()) } }
+            MainButton("ذخیرهٔ ساعت‌های بسته") { st.run("ذخیره شد", then = { ver++ }) { saveTimeLimits(grid.toMap()) } }
             Group(title = "سایت‌های مجاز (فهرست سفید)") {
                 if (sites.isEmpty()) Text("فهرست خالی است.", color = K.dim, modifier = Modifier.padding(16.dp))
                 sites.forEachIndexed { i, w ->
@@ -1557,7 +1570,13 @@ private fun SdPage(st: AppState, back: () -> Unit) {
             val name = uri.lastPathSegment?.substringAfterLast('/')?.substringAfterLast(':') ?: "file"
             val bytes = runCatching { ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
             if (bytes == null) st.message = "فایل خوانده نشد"
-            else st.run("فرستاده شد", "فرستاده نشد", then = { ver++ }) { sdUpload(path, name, bytes) }
+            else scope.launch {
+                st.busy = true
+                val r = st.io { sdUpload(path, name, bytes) }
+                st.busy = false
+                st.message = r.fold({ when (it) { null -> "فرستاده شد"; "exist" -> "فایلی با همین اسم هست؛ اول اسمش را عوض کن"; "no_sdcard" -> "کارت حافظه نیست"; else -> "فرستاده نشد" } }, { st.netError(it) })
+                if (r.getOrNull() == null && r.isSuccess) ver++
+            }
         }
     }
     val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
@@ -1565,7 +1584,7 @@ private fun SdPage(st: AppState, back: () -> Unit) {
         saving = null
         if (uri != null) scope.launch {
             st.busy = true
-            val r = st.io { (net as Uploader).download(host, "$path/${f.name}") }
+            val r = st.io { (net as Uploader).download(host, sdUrlPath(path, f.name)) }
             st.busy = false
             r.onSuccess { b -> runCatching { ctx.contentResolver.openOutputStream(uri)?.use { it.write(b) } }; st.message = "ذخیره شد" }
                 .onFailure { st.message = st.netError(it) }

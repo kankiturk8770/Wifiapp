@@ -340,3 +340,9 @@ class LastPagesTest {
         assertTrue(m.posts.last().contains("name_SD_CARD=a.mp3*b*"))
     }
 }
+
+class SdPathTest {
+    @Test fun downloadPathIsEncodedPerPart() {
+        assertEquals("/mmc2/My%20Music/%D8%B3%D9%84%D8%A7%D9%85.mp3", sdUrlPath("/mmc2/My Music", "سلام.mp3"))
+    }
+}

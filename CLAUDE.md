@@ -17,7 +17,8 @@
   فیلتر سایت، شبکهٔ مهمان، باند، VPN و … در مودمش هست؛ پس همهٔ صفحه‌ها بدون نگاه به پرچم‌های `set.js` نشان داده می‌شوند (فقط انتخاب سیم‌کارت
   وقتی بیش از یک سیم هست). عوض کردن IMEI عمداً ساخته نشد.
 - کدهای وب مودم که صاحب ریپو فرستاد: `main.js`، `net.js`، `set.js`، `sim_device.js`، `wifi.js`، `com.js`، `ext/set.js`، `ext/menu.js`،
-  `subpg/ota_update.html`، `subpg/wifi_sleep_mode.html`، `subpg/firewall_rate_limit.html`.
+  `subpg/ota_update.html`، `subpg/wifi_sleep_mode.html`، `subpg/firewall_rate_limit.html`، و بعد همهٔ ۵۲ صفحهٔ `subpg/*.html` (همه چک شد؛
+  فقط `js/util.js` نیامد).
 - `ext/set.js` (اسم مودم «4G Mobile Hotspot»): AP Station، کارت حافظه، باند ۵ گیگ و ۴۰ مگاهرتز، قفل شبکه روشن؛ حداکثر ۸ دستگاه؛ وای‌فای
   ۲.۴ فقط `6` (b/g/n/ax). `TSW_SUPPORT` (روشن/خاموش زمان‌دار) خاموش است، پس ساخته نشد. آپدیت با فایل: `cgi-bin/upload/upload.cgi` فیلد `filename`.
 
@@ -51,7 +52,8 @@
 ## کارهای باز
 - [ ] روی مودم واقعی: ورود، وضعیت، وصل/قطع، ذخیرهٔ وای‌فای، پیامک، ری‌استارت، و همهٔ صفحه‌های تازه.
 - [ ] اعلان پیامک روی گوشی واقعی: گوشی قفل و چند ساعت بی‌کار، بعد از ری‌استارت گوشی، و روی گوشی‌های شیائومی/سامسونگ (بهینه‌سازی باتری خودشان).
-- [ ] از صاحب ریپو بخواه (اگر چیزی درست کار نکرد): `subpg/sd_httpshare.html` (اسم فیلد آپلود و آدرس دانلود کارت حافظه؛ الان `filename` و
-      `/mmc2/...`)، `subpg/firewall_parental_control.html` (ردیف ۰ جدول ساعت کدام روز است؛ الان یکشنبه، و آبی = مجاز)، `subpg/wifi_ap_station.html`
-      (گزینه‌های رمزنگاری؛ الان `TKIPCCMP`)، `js/util.js` (`encodeMessage`/`decodeMessage`/`transUnixTime`).
+- [ ] `js/util.js` (فقط اگر پیامک/USSD فارسی یا زمان فایل‌های کارت حافظه خراب آمد): `encodeMessage`/`decodeMessage`/`transUnixTime`.
+- از HTMLها تأیید شد: کنترل والدین ردیف ۰ = یکشنبه، خانهٔ پر = ساعت بسته؛ AP Station رمزنگاری TKIP/CCMP/TKIPCCMP و WEP با کلید ۰ تا ۳؛
+  کارت حافظه: آپلود `/cgi-bin/httpshare/<اسم>` با `filename` و دو فیلد زمان بعد از `GOFORM_HTTPSHARE_CHECK_FILE`، دانلود = خود مسیر `/mmc2/...`؛
+  DNS دستی `0`/`1`؛ «ری‌استارت زمان‌دار» صفحهٔ مودم همان «نگه داشتن اتصال» است.
 - عمداً ساخته نشد: عوض کردن IMEI.

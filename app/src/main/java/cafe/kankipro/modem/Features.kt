@@ -937,13 +937,28 @@ fun ModemApi.uploadFirmware(name: String, bytes: ByteArray): String {
     return Regex("success|failure\\d?").find(body)?.value ?: "failure"
 }
 
-/** sd_httpshare upload: /cgi-bin/httpshare/<name>, multipart. */
-fun ModemApi.sdUpload(folder: String, name: String, bytes: ByteArray): Boolean {
-    val up = net as? Uploader ?: return false
+/** GOFORM_HTTPSHARE_CHECK_FILE: "noexist", "exist", "processing" or "no_sdcard". */
+fun ModemApi.sdCheck(fullPath: String): String = set("GOFORM_HTTPSHARE_CHECK_FILE", listOf("path_SD_CARD" to fullPath)).s("result")
+
+/**
+ * sd_httpshare upload, as the page does it: first check the full path (this also tells the modem
+ * the folder), then post the file to /cgi-bin/httpshare/<name> with the two time fields.
+ * Returns null when it worked, else why not.
+ */
+fun ModemApi.sdUpload(folder: String, name: String, bytes: ByteArray): String? {
+    val up = net as? Uploader ?: return "failure"
+    when (sdCheck("$folder/$name")) {
+        "exist" -> return "exist"
+        "no_sdcard" -> return "no_sdcard"
+    }
     val (t, u) = sdTime()
     val body = up.upload(
         host, "/cgi-bin/httpshare/" + java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20"), "filename", name, bytes,
-        mapOf("path_SD_CARD" to folder, "path_SD_CARD_time" to t, "path_SD_CARD_time_unix" to u),
+        linkedMapOf("path_SD_CARD_time" to t, "path_SD_CARD_time_unix" to u),
     )
-    return !body.lowercase().contains("fail")
+    return if (body.lowercase().contains("fail")) "failure" else null
 }
+
+/** The download link is the file's own path (/mmc2/...), encoded, like the page's href. */
+fun sdUrlPath(folder: String, name: String): String =
+    ("$folder/$name").split("/").joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
