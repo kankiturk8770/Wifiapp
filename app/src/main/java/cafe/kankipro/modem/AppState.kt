@@ -38,7 +38,6 @@ class AppState(app: Application) : AndroidViewModel(app) {
 
     init {
         api.host = host
-        api.loginKind = prefs.getString("loginKind", "") ?: ""
         if (savedPassword.isNotEmpty()) login(savedPassword, remember = true)
     }
 
@@ -61,7 +60,6 @@ class AppState(app: Application) : AndroidViewModel(app) {
                 when (res) {
                     is ModemApi.Login.Ok -> {
                         prefs.edit()
-                            .putString("loginKind", api.loginKind)
                             .putString("pass", if (remember) password else "")
                             .apply()
                         loggedIn = true
@@ -70,7 +68,8 @@ class AppState(app: Application) : AndroidViewModel(app) {
                     }
                     is ModemApi.Login.Wrong -> message =
                         "رمز اشتباه است" + if (res.left.isNotEmpty()) " (${res.left} بار دیگر می‌توانی امتحان کنی)" else ""
-                    ModemApi.Login.Locked -> message = "ورود قفل شد. چند دقیقه صبر کن و دوباره امتحان کن"
+                    is ModemApi.Login.Locked -> message =
+                        "ورود قفل شد. " + (res.seconds.toIntOrNull()?.let { "${(it + 59) / 60} دقیقهٔ دیگر" } ?: "چند دقیقه صبر کن و") + " دوباره امتحان کن"
                     is ModemApi.Login.Failed -> message = "ورود نشد: ${res.why}"
                 }
             }
@@ -137,12 +136,14 @@ class AppState(app: Application) : AndroidViewModel(app) {
         if (on) "دستور وصل شدن رفت" else "اینترنت مودم قطع شد", "مودم قبول نکرد",
     ) { api.connect(on) }
 
+    fun turnOff() = act("مودم خاموش می‌شود", "مودم قبول نکرد") { api.turnOff() }
+
     fun reboot() = act("مودم دارد دوباره روشن می‌شود (حدود یک دقیقه)", "مودم قبول نکرد") { api.reboot() }
 
     fun saveWifi(ssid: String, pass: String, mode: String, hidden: Boolean, max: String) {
-        val encode = wifi?.has("WPAPSK1_encode") == true
+        val old = wifi ?: JSONObject()
         act("ذخیره شد. وای‌فای چند ثانیه قطع می‌شود؛ اگر رمز را عوض کردی با رمز تازه وصل شو", "مودم قبول نکرد") {
-            api.saveWifi(ssid, pass, mode, hidden, max, encode)
+            api.saveWifi(ssid, pass, mode, hidden, max, old)
         }
     }
 

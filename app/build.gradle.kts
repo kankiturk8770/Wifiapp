@@ -12,8 +12,8 @@ android {
         applicationId = "cafe.kankipro.modem"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     // One fixed key for every build, so a new APK installs over the old one.

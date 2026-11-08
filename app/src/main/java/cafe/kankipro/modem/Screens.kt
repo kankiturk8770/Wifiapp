@@ -124,7 +124,7 @@ fun App(st: AppState) {
 
 @Composable
 private fun BottomBar(st: AppState) {
-    val unread = st.status.s("sms_unread_num").toIntOrNull() ?: 0
+    val unread = unread(st.status)
     val items = listOf(
         Triple(Tab.HOME, Icons.Filled.Home, "خانه"),
         Triple(Tab.WIFI, Icons.Filled.Wifi, "وای‌فای"),
@@ -147,6 +147,10 @@ private fun BottomBar(st: AppState) {
         }
     }
 }
+
+// Same as the modem page: device inbox count when given, else the general one.
+private fun unread(s: JSONObject): Int =
+    s.optString("sms_dev_unread_num").toIntOrNull() ?: s.optString("sms_unread_num").toIntOrNull() ?: 0
 
 @Composable
 private fun Page(content: @Composable ColumnScope.() -> Unit) {
@@ -232,10 +236,11 @@ private fun HomeScreen(st: AppState) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            s.s("network_provider").ifEmpty { s.s("spn_name_data").let(Codec::ucs2Decode) }.ifEmpty { "اپراتور" },
+                            s.s("network_provider_spn").ifEmpty { s.s("network_provider") }
+                                .ifEmpty { Codec.ucs2Decode(s.s("spn_name_data")) }.ifEmpty { "اپراتور" },
                             fontSize = 20.sp, fontWeight = FontWeight.Bold, color = K.text,
                         )
-                        Text(netName(s.s("network_type")), color = K.dim, fontSize = 13.sp)
+                        Text(netName(s.s("sub_network_type").ifEmpty { s.s("network_type") }), color = K.dim, fontSize = 13.sp)
                     }
                     Bars(level, if (level <= 1) K.bad else if (level <= 2) K.warn else K.good)
                 }
@@ -274,7 +279,8 @@ private fun HomeScreen(st: AppState) {
                 battery(s), Modifier.weight(1f),
                 tint = (s.s("battery_vol_percent").toIntOrNull() ?: 100).let { if (it < 20) K.bad else K.good },
             )
-            Stat(Icons.Filled.Devices, "دستگاه وصل", s.s("sta_count").ifEmpty { "—" }, Modifier.weight(1f), K.blue)
+            val users = (s.s("sta_count").toIntOrNull() ?: 0) + (s.s("m_sta_count").toIntOrNull() ?: 0)
+            Stat(Icons.Filled.Devices, "دستگاه وصل", if (s.s("sta_count").isEmpty()) "—" else "$users", Modifier.weight(1f), K.blue)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             val session = sum(s.s("realtime_rx_bytes"), s.s("realtime_tx_bytes"))
@@ -300,12 +306,24 @@ private fun battery(s: JSONObject): String {
 }
 
 private fun netName(t: String): String = when (t.uppercase()) {
-    "LTE", "LTE_A", "LTE-A", "4G", "E-UTRAN" -> "4G (LTE)"
-    "", "NO_SERVICE", "LIMITED_SERVICE" -> "بدون شبکه"
+    "LTE", "LTE_A", "LTE-A", "LTE+", "4G", "4G+", "E-UTRAN" -> "4G ($t)"
+    "", "NO_SERVICE", "NO SERVICE" -> "بدون شبکه"
+    "LIMITED_SERVICE", "LIMITED SERVICE" -> "شبکهٔ محدود (فقط اضطراری)"
+    "SEARCHING" -> "در حال جستجوی شبکه…"
     "WCDMA", "HSPA", "HSDPA", "HSUPA", "HSPA+", "DC-HSPA+", "UMTS" -> "3G ($t)"
     "GSM", "GPRS", "EDGE" -> "2G ($t)"
     "NR", "5G", "ENDC" -> "5G"
     else -> t
+}
+
+private fun simState(v: String): String = when (v) {
+    "modem_init_complete" -> "آماده"
+    "modem_waitpin" -> "منتظر PIN"
+    "modem_waitpuk" -> "منتظر PUK (قفل)"
+    "modem_sim_undetected", "modem_undetected" -> "سیم‌کارت نیست"
+    "modem_sim_destroy", "modem_destroy" -> "سیم‌کارت خراب است"
+    "modem_imsi_waitnck" -> "قفل شبکه"
+    else -> v
 }
 
 // ---------------- wifi ----------------
@@ -321,9 +339,7 @@ private fun WifiScreen(st: AppState) {
             Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             return@Page
         }
-        val oldPass = w.s("WPAPSK1").ifEmpty {
-            runCatching { String(java.util.Base64.getDecoder().decode(w.s("WPAPSK1_encode"))) }.getOrDefault("")
-        }
+        val oldPass = w.s("password")
         var ssid by remember(w) { mutableStateOf(w.s("SSID1")) }
         var pass by remember(w) { mutableStateOf(oldPass) }
         var mode by remember(w) { mutableStateOf(w.s("AuthMode").ifEmpty { "WPA2PSK" }) }
@@ -542,6 +558,7 @@ private fun MoreScreen(st: AppState) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var reboot by remember { mutableStateOf(false) }
+    var off by remember { mutableStateOf(false) }
     var report by remember { mutableStateOf<String?>(null) }
     Page {
         Title("بیشتر")
@@ -549,12 +566,12 @@ private fun MoreScreen(st: AppState) {
             Column {
                 Text("آنتن", color = K.text, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(6.dp))
-                Line("RSRP (قدرت)", s.s("lte_rsrp").ifEmpty { s.s("rsrp") }.let { if (it.isEmpty()) "" else "$it dBm" })
-                Line("SINR (کیفیت)", s.s("lte_snr").ifEmpty { s.s("sinr") }.let { if (it.isEmpty()) "" else "$it dB" })
-                Line("RSRQ", s.s("lte_rsrq").ifEmpty { s.s("rsrq") })
-                Line("RSSI", s.s("rssi"))
-                Line("باند", s.s("lte_band"))
-                Line("Cell ID", s.s("cell_id"))
+                Line("RSRP (قدرت)", s.s("lte_rsrp").let { if (it.isEmpty()) "" else "$it dBm" })
+                Line("SINR (کیفیت)", s.s("detail_cell_sinr").let { if (it.isEmpty()) "" else "$it dB" })
+                Line("RSRQ", s.s("detail_cell_rsrq"))
+                Line("RSSI", s.s("detail_cell_rssi").ifEmpty { s.s("rssi") })
+                Line("PCI", s.s("detail_cell_pci"))
+                Line("Cell ID", s.s("detail_cell_id"))
                 Text(
                     "RSRP بالای ‎-90‎ خوب، ‎-90‎ تا ‎-105‎ متوسط، زیر ‎-105‎ ضعیف. SINR بالای ۱۰ خوب.",
                     color = K.dim, fontSize = 12.sp,
@@ -569,8 +586,10 @@ private fun MoreScreen(st: AppState) {
                 Line("IP اینترنت", s.s("wan_ipaddr"))
                 Line("شمارهٔ سیم‌کارت", s.s("msisdn"))
                 Line("IMEI", s.s("imei"))
-                Line("نسخهٔ نرم‌افزار", s.s("cr_version").ifEmpty { s.s("wa_inner_version") })
-                Line("وضعیت سیم‌کارت", s.s("modem_main_state"))
+                Line("ICCID سیم‌کارت", s.s("ziccid"))
+                Line("نسخهٔ نرم‌افزار", s.s("cstm_sw_version").ifEmpty { s.s("cr_version") })
+                Line("نسخهٔ سخت‌افزار", s.s("hw_version"))
+                Line("وضعیت سیم‌کارت", simState(s.s("modem_main_state")))
             }
         }
         Button(
@@ -578,6 +597,9 @@ private fun MoreScreen(st: AppState) {
             colors = ButtonDefaults.buttonColors(containerColor = K.warn, contentColor = K.bg),
         ) {
             Icon(Icons.Filled.RestartAlt, null); Spacer(Modifier.width(8.dp)); Text("ری‌استارت مودم")
+        }
+        OutlinedButton(onClick = { off = true }, enabled = !st.busy, modifier = Modifier.fillMaxWidth().height(50.dp)) {
+            Icon(Icons.Filled.PowerSettingsNew, null, tint = K.bad); Spacer(Modifier.width(8.dp)); Text("خاموش کردن مودم", color = K.bad)
         }
         OutlinedButton(
             onClick = { scope.launch { report = "…"; report = st.diagnostics() } },
@@ -598,6 +620,16 @@ private fun MoreScreen(st: AppState) {
             text = { Text("اینترنت و وای‌فای حدود یک دقیقه قطع می‌شود.") },
             confirmButton = { TextButton(onClick = { reboot = false; st.reboot() }) { Text("ری‌استارت") } },
             dismissButton = { TextButton(onClick = { reboot = false }) { Text("نه") } },
+        )
+    }
+    if (off) {
+        AlertDialog(
+            onDismissRequest = { off = false },
+            icon = { Icon(Icons.Filled.PowerSettingsNew, null, tint = K.bad) },
+            title = { Text("مودم خاموش شود؟") },
+            text = { Text("برای روشن کردن دوباره باید دکمهٔ روشن خود مودم را بزنی.") },
+            confirmButton = { TextButton(onClick = { off = false; st.turnOff() }) { Text("خاموش کن", color = K.bad) } },
+            dismissButton = { TextButton(onClick = { off = false }) { Text("نه") } },
         )
     }
     report?.let { r ->

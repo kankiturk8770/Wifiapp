@@ -52,6 +52,31 @@ object Codec {
         ).joinToString(";")
     }
 
+    // Newer firmware (PASSWORD_ENCODE false): CryptoJS AES-CBC, ZeroPadding, key = first 24 and
+    // iv = first 16 characters of (rnum_js + imei + "FFFF..."), output Base64. Same as com.js.
+    private fun aesKeys(rnum: String, imei: String): Pair<ByteArray, ByteArray> {
+        val s = rnum + imei + "FFFFFFFFFFFFFFFFFFFFFFFFFFFF"
+        return s.substring(0, 24).toByteArray(Charsets.ISO_8859_1) to s.substring(0, 16).toByteArray(Charsets.ISO_8859_1)
+    }
+
+    private fun aes(mode: Int, rnum: String, imei: String, data: ByteArray): ByteArray {
+        val (key, iv) = aesKeys(rnum, imei)
+        val c = javax.crypto.Cipher.getInstance("AES/CBC/NoPadding")
+        c.init(mode, javax.crypto.spec.SecretKeySpec(key, "AES"), javax.crypto.spec.IvParameterSpec(iv))
+        return c.doFinal(data)
+    }
+
+    fun modemAes(rnum: String, imei: String, plain: String): String {
+        val raw = plain.toByteArray(Charsets.UTF_8)
+        val padded = raw.copyOf(((raw.size + 15) / 16) * 16) // zero padding, nothing added when full
+        return Base64.getEncoder().encodeToString(aes(javax.crypto.Cipher.ENCRYPT_MODE, rnum, imei, padded))
+    }
+
+    fun modemAesOpen(rnum: String, imei: String, b64: String): String {
+        val out = aes(javax.crypto.Cipher.DECRYPT_MODE, rnum, imei, Base64.getDecoder().decode(b64))
+        return String(out.copyOf(out.indexOfLast { it != 0.toByte() } + 1), Charsets.UTF_8)
+    }
+
     fun bytes(v: String?): String {
         val n = v?.toDoubleOrNull() ?: return "—"
         val units = listOf("B", "KB", "MB", "GB", "TB")
