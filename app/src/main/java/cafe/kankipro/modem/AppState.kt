@@ -39,6 +39,9 @@ class AppState(private val app: Application, transport: Transport?) : AndroidVie
     var message by mutableStateOf<String?>(null)   // short note shown at the bottom
     var tab by mutableStateOf(Tab.HOME)
 
+    /** Open SMS compose window (from the SMS tab, a contact, or a reply). */
+    var compose by mutableStateOf<Compose?>(null)
+
     /** Open sub-pages, last one on top (the system back button closes it). */
     val pages = mutableStateListOf<String>()
 

@@ -1,6 +1,9 @@
 package cafe.kankipro.modem
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material.icons.filled.Sms
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,6 +30,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -82,6 +86,8 @@ fun PageHost(st: AppState, name: String) {
         "ttl" -> TtlPage(st, back)
         "simswitch" -> SimSwitchPage(st, back)
         "update" -> UpdatePage(st, back)
+        "lang" -> LanguagePage(st, back)
+        "simlock" -> SimLockPage(st, back)
         else -> SubPage("—", back) { Empty("این صفحه پیدا نشد.") }
     }
 }
@@ -254,6 +260,21 @@ private fun DataLimitPage(st: AppState, back: () -> Unit) {
             val valid = !on || ((amount.toDoubleOrNull() ?: 0.0) > 0 && (alert.toIntOrNull() ?: 0) in 1..100)
             MainButton("ذخیره", enabled = valid) {
                 st.run("ذخیره شد", then = reload) { setDataLimit(on, byData, if (byData) "${amount}_$unit" else amount, alert) }
+            }
+            Group(title = "تنظیم دستی مصرف این ماه", footer = "اگر شمارندهٔ مودم با حساب اپراتور جور نیست، عدد درست را بزن.") {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    var usedIn by remember(d) { mutableStateOf("") }
+                    var usedUnit by remember(d) { mutableStateOf("1024") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Field(if (byData) "مصرف درست" else "ساعت درست", usedIn, { v -> usedIn = v.filter { it.isDigit() || it == '.' }.take(8) }, number = true, ltr = true, modifier = Modifier.weight(1f))
+                        if (byData) Column(Modifier.weight(1f)) { Choice("واحد", listOf("1" to "MB", "1024" to "GB"), usedUnit) { usedUnit = it } }
+                    }
+                    GhostButton("ثبت مصرف", enabled = usedIn.toDoubleOrNull() != null) {
+                        // The modem takes MB for data and hours for time.
+                        val v = if (byData) ((usedIn.toDouble() * usedUnit.toDouble())).let { if (it % 1.0 == 0.0) it.toLong().toString() else it.toString() } else usedIn
+                        st.run("ثبت شد", then = reload) { calibrate(byData, v) }
+                    }
+                }
             }
             GhostButton("صفر کردن مصرف این ماه", Icons.Filled.Refresh, K.warn) { reset = true }
             if (reset) Ask("مصرف ماه صفر شود؟", "شمارندهٔ مصرف این ماه مودم از صفر شروع می‌شود.", "صفر کن",
@@ -744,15 +765,23 @@ private fun UssdPage(st: AppState, back: () -> Unit) {
     }
 }
 
+private val GROUPS = listOf("common" to "عمومی", "family" to "خانواده", "friend" to "دوستان", "colleague" to "همکاران")
+
 @Composable
 private fun ContactsPage(st: AppState, back: () -> Unit) {
     var ver by remember { mutableIntStateOf(0) }
     var edit by remember { mutableStateOf<Contact?>(null) }
     var del by remember { mutableStateOf<Contact?>(null) }
+    var delAll by remember { mutableStateOf<Int?>(null) }
+    var group by remember { mutableStateOf("") }
     SubPage("دفترچه تلفن", back, action = {
-        IconButton(onClick = { edit = Contact("-1", "", "", false, "") }) { Icon(Icons.Filled.Add, "مخاطب تازه", tint = K.ice) }
+        IconButton(onClick = { edit = Contact("-1", "", "", false, "common") }) { Icon(Icons.Filled.Add, "مخاطب تازه", tint = K.ice) }
     }) {
-        Load(st, ver, { contacts() }) { list, _ ->
+        Load(st, ver, { Triple(contacts(), runCatching { contactRoom(false) }.getOrDefault(0 to 0), runCatching { contactRoom(true) }.getOrDefault(0 to 0)) }) { (all, dev, sim), _ ->
+            if (dev.second > 0) Room(dev.first, dev.second, "جای مخاطب در مودم")
+            if (sim.second > 0) Room(sim.first, sim.second, "جای مخاطب در سیم‌کارت")
+            Choice("گروه", listOf("" to "همه") + GROUPS + ("sim" to "سیم‌کارت"), group) { group = it }
+            val list = when (group) { "" -> all; "sim" -> all.filter { it.onSim }; else -> all.filter { !it.onSim && it.group == group } }
             if (list.isEmpty()) Empty("مخاطبی نیست. با + اضافه کن.")
             else Group(title = "${list.size} مخاطب") {
                 list.forEachIndexed { i, c ->
@@ -762,33 +791,53 @@ private fun ContactsPage(st: AppState, back: () -> Unit) {
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(c.name, color = K.text, fontWeight = FontWeight.Bold)
-                            Row { Ltr { Text(c.number, color = K.dim, fontSize = 12.sp) }; Spacer(Modifier.width(6.dp)); Text(if (c.onSim) "سیم‌کارت" else "مودم", color = K.dim, fontSize = 12.sp) }
+                            Row {
+                                Ltr { Text(c.number, color = K.dim, fontSize = 12.sp) }
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (c.onSim) "سیم‌کارت" else GROUPS.firstOrNull { it.first == c.group }?.second ?: "مودم", color = K.dim, fontSize = 12.sp)
+                            }
                         }
+                        IconButton(onClick = { st.pages.clear(); st.tab = Tab.SMS; st.compose = Compose(c.number) }) { Icon(Icons.Filled.Sms, "پیامک", tint = K.pink) }
                         IconButton(onClick = { edit = c }) { Icon(Icons.Filled.Edit, "ویرایش", tint = K.ice) }
                         IconButton(onClick = { del = c }) { Icon(Icons.Filled.Delete, "پاک کردن", tint = K.bad) }
                     }
                 }
             }
+            if (all.any { !it.onSim }) GhostButton("پاک کردن همهٔ مخاطب‌های مودم", Icons.Filled.Delete, K.bad) { delAll = 1 }
+            if (all.any { it.onSim }) GhostButton("پاک کردن همهٔ مخاطب‌های سیم‌کارت", Icons.Filled.Delete, K.bad) { delAll = 0 }
         }
     }
     edit?.let { c ->
+        val isNew = c.id == "-1"
         var name by remember(c) { mutableStateOf(c.name) }
         var num by remember(c) { mutableStateOf(c.number) }
         var sim by remember(c) { mutableStateOf(c.onSim) }
+        var grp by remember(c) { mutableStateOf(c.group.ifEmpty { "common" }) }
+        var home by remember(c) { mutableStateOf(c.home) }
+        var office by remember(c) { mutableStateOf(c.office) }
+        var email by remember(c) { mutableStateOf(c.email) }
+        val phone = { v: String -> v.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }.take(40) }
         AlertDialog(
             onDismissRequest = { edit = null },
-            title = { Text(if (c.id == "-1") "مخاطب تازه" else "ویرایش مخاطب") },
+            title = { Text(if (isNew) "مخاطب تازه" else "ویرایش مخاطب") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Segments(listOf("در مودم", "در سیم‌کارت"), if (sim) 1 else 0) { sim = it == 1 }
                     Field("اسم", name, { name = it.take(if (sim) 14 else 22) })
-                    Field("شماره", num, { v -> num = v.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }.take(40) }, ltr = true, number = true)
-                    if (c.id == "-1") Segments(listOf("در مودم", "در سیم‌کارت"), if (sim) 1 else 0) { sim = it == 1 }
+                    Field("موبایل", num, { num = phone(it) }, ltr = true, number = true)
+                    if (!sim) {
+                        Field("تلفن خانه", home, { home = phone(it) }, ltr = true, number = true)
+                        Field("تلفن محل کار", office, { office = phone(it) }, ltr = true, number = true)
+                        Field("ایمیل", email, { email = it.trim().take(40) }, ltr = true)
+                        Choice("گروه", GROUPS, grp) { grp = it }
+                    } else Text("روی سیم‌کارت فقط اسم و یک شماره جا می‌شود.", color = K.dim, fontSize = 12.sp)
                 }
             },
             confirmButton = {
                 TextButton(enabled = name.isNotBlank() && num.isNotBlank(), onClick = {
                     edit = null
-                    st.run("ذخیره شد", then = { ver++ }) { saveContact(c.id, name.trim(), num, sim) }
+                    val n = Contact(c.id, name.trim(), num, sim, grp, home, office, email)
+                    st.run("ذخیره شد", then = { ver++ }) { saveContact(n, if (isNew) null else c.onSim) }
                 }) { Text("ذخیره", color = K.ice) }
             },
             dismissButton = { TextButton(onClick = { edit = null }) { Text("لغو", color = K.dim) } },
@@ -796,6 +845,10 @@ private fun ContactsPage(st: AppState, back: () -> Unit) {
         )
     }
     del?.let { c -> Ask("«${c.name}» پاک شود؟", c.number, "پاک کن", danger = true, onYes = { st.run("پاک شد", then = { ver++ }) { deleteContacts(listOf(c.id)) } }, onNo = { del = null }) }
+    delAll?.let { loc ->
+        Ask("همه پاک شوند؟", if (loc == 0) "همهٔ مخاطب‌های سیم‌کارت پاک می‌شوند." else "همهٔ مخاطب‌های مودم پاک می‌شوند.", "همه را پاک کن", danger = true,
+            onYes = { st.run("پاک شد", then = { ver++ }) { deleteAllContacts(loc) } }, onNo = { delAll = null })
+    }
 }
 
 // ---------------- device ----------------
@@ -812,7 +865,8 @@ private fun AboutPage(st: AppState, back: () -> Unit) = SubPage("اطلاعات 
         Divider(); InfoRow("Cell ID", s.s("detail_cell_id"))
         Divider(); InfoRow("شبکه", netName(s.s("sub_network_type").ifEmpty { s.s("network_type") }))
     }
-    Load(st, 0, { deviceInfo() }) { d, _ ->
+    Load(st, 0, { deviceInfo().put("band", runCatching { band() }.getOrDefault("")) }) { d, _ ->
+        if (d.s("band").isNotEmpty()) Group { InfoRow("باند فعلی", d.s("band")) }
         Group(title = "مودم") {
             InfoRow("IMEI", d.s("imei")); Divider()
             InfoRow("ICCID سیم‌کارت", d.s("ziccid")); Divider()
@@ -857,13 +911,25 @@ private fun TimePage(st: AppState, back: () -> Unit) = SubPage("ساعت و تا
         Segments(listOf("خودکار از اینترنت", "از ساعت همین گوشی"), if (auto) 0 else 1) { auto = it == 0 }
         if (auto && !st.connected) Text("برای ساعت خودکار، اینترنت مودم باید وصل باشد.", color = K.warn, fontSize = 13.sp)
         Choice("منطقهٔ زمانی", zList, zone) { zone = it }
+        val servers = remember(d) { mutableStateListOf(d.s("sntp_server0"), d.s("sntp_server1"), d.s("sntp_server2")) }
+        val others = remember(d) { mutableStateListOf(d.s("sntp_other_server0"), d.s("sntp_other_server1"), d.s("sntp_other_server2")) }
+        if (auto) {
+            // Same list as the modem page: its fixed servers, "Other" (type one), or none.
+            val fixed = (0..2).map { d.s("sntp_static_server$it") }.filter { it.isNotEmpty() }
+            val opts = fixed.map { it to it } + listOf("Other" to "دیگر (بنویس)", "" to "هیچ")
+            (0..2).forEach { i ->
+                Choice("سرور ساعت ${i + 1}", opts.let { o -> if (o.none { it.first == servers[i] }) o + (servers[i] to servers[i]) else o }, servers[i]) { servers[i] = it }
+                if (servers[i] == "Other") Field("آدرس سرور ${i + 1}", others[i], { others[i] = it.trim() }, ltr = true)
+            }
+        }
         Group { SwitchRow("ساعت تابستانی", null, dst) { dst = it } }
-        MainButton("ذخیره", enabled = !auto || st.connected) {
+        MainButton("ذخیره", enabled = (!auto || st.connected) && (!auto || servers.any { it.isNotEmpty() })) {
             st.run("ذخیره شد", then = reload) {
                 setSntp(
                     auto, d, zone, if (dst) "1" else "0",
                     now.get(java.util.Calendar.YEAR), now.get(java.util.Calendar.MONTH) + 1, now.get(java.util.Calendar.DAY_OF_MONTH),
                     now.get(java.util.Calendar.HOUR_OF_DAY), now.get(java.util.Calendar.MINUTE),
+                    servers.toList(), others.toList(),
                 )
             }
         }
@@ -925,7 +991,27 @@ private fun UpdatePage(st: AppState, back: () -> Unit) {
     var ask by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     SubPage("به‌روزرسانی مودم", back, "نرم‌افزار تازهٔ خود مودم را از سازنده می‌گیرد (اینترنت مودم باید وصل باشد).") {
-        Load(st, 0, { deviceInfo() }) { d, _ -> Group { InfoRow("نسخهٔ فعلی", d.s("cstm_sw_version").ifEmpty { d.s("cr_version") }) } }
+        Load(st, 0, { deviceInfo() to otaSettings() }) { (d, o), reload ->
+            Group {
+                InfoRow("نسخهٔ فعلی", d.s("cstm_sw_version").ifEmpty { d.s("cr_version") })
+                if (o.s("dm_last_check_time").isNotEmpty()) { Divider(); InfoRow("آخرین بررسی", o.s("dm_last_check_time")) }
+            }
+            // Only the two values ZTE pages use (0 = check by hand, 1 = check by itself); anything else is left alone.
+            if (o.s("fota_updateMode") == "0" || o.s("fota_updateMode") == "1") {
+                var auto by remember(o) { mutableStateOf(o.s("fota_updateMode") == "1") }
+                var days by remember(o) { mutableStateOf(o.s("fota_updateIntervalDay").ifEmpty { "7" }) }
+                var roam by remember(o) { mutableStateOf(o.s("fota_allowRoamingUpdate") == "1") }
+                Group(title = "بررسی خودکار") {
+                    SwitchRow("مودم خودش نسخهٔ تازه را بررسی کند", null, auto) { auto = it }
+                    if (auto) {
+                        Divider()
+                        SwitchRow("در رومینگ هم بررسی شود", "در رومینگ اینترنت گران‌تر است", roam) { roam = it }
+                    }
+                }
+                if (auto) Choice("هر چند روز", listOf("1", "7", "15", "30").map { it to "$it روز" }.let { l -> if (l.none { it.first == days }) l + (days to "$days روز") else l }, days) { days = it }
+                GhostButton("ذخیرهٔ بررسی خودکار") { st.run("ذخیره شد", then = reload) { setOtaSettings(if (auto) "1" else "0", days, roam) } }
+            }
+        }
         val has = state == "has_critical" || state == "has_optional" || state == "already_has_pkg"
         state?.let {
             Group {
@@ -948,5 +1034,33 @@ private fun UpdatePage(st: AppState, back: () -> Unit) {
         if (has) GhostButton("دانلود و نصب", color = K.good) { ask = true }
         if (ask) Ask("نصب شود؟", "مودم نسخهٔ تازه را دانلود و نصب می‌کند و خودش ری‌استارت می‌شود. باتری باید شارژ داشته باشد و مودم را خاموش نکن.", "نصب کن",
             onYes = { st.run("دانلود شروع شد؛ مودم خودش ری‌استارت می‌شود") { acceptUpdate() } }, onNo = { ask = false })
+    }
+}
+
+private val LANGS = mapOf("en" to "English", "zh-cn" to "中文", "fre" to "Français", "ar" to "العربية", "fa" to "فارسی")
+
+@Composable
+private fun LanguagePage(st: AppState, back: () -> Unit) = SubPage("زبان صفحهٔ مودم", back, "زبان صفحهٔ وب خود مودم (192.168.0.1). این برنامه همیشه فارسی است.") {
+    Load(st, 0, { webLanguage() }) { (cur, sup), reload ->
+        var lang by remember(cur) { mutableStateOf(cur) }
+        val opts = (sup.ifEmpty { LANGS.keys.toList() }).map { it to (LANGS[it] ?: it) }
+        Choice("زبان", opts, lang) { lang = it }
+        MainButton("ذخیره", enabled = lang != cur) { st.run("ذخیره شد", then = reload) { setWebLanguage(lang) } }
+    }
+}
+
+@Composable
+private fun SimLockPage(st: AppState, back: () -> Unit) = SubPage("باز کردن قفل سیم‌کارت", back, "اگر مودم سیم‌کارت اپراتور دیگر را قفل کرده، کد باز کردن را اینجا بزن.") {
+    Load(st, 0, { simLock() }) { d, reload ->
+        val locked = d.s("sim_lock_status") == "lock"
+        Group {
+            InfoRow("وضعیت", if (locked) "قفل" else "باز", if (locked) K.bad else K.good)
+            if (d.s("sim_unlock_nck_time").isNotEmpty()) { Divider(); InfoRow("فرصت باقی", d.s("sim_unlock_nck_time")) }
+        }
+        if (locked) {
+            var code by remember { mutableStateOf("") }
+            Field("کد باز کردن", code, { code = it.trim().take(32) }, ltr = true)
+            MainButton("باز کن", enabled = code.isNotEmpty()) { st.run("قفل باز شد", "کد اشتباه است", then = reload) { unlockSim(code) } }
+        }
     }
 }

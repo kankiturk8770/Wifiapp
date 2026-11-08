@@ -252,6 +252,8 @@ class ModemApi(private val net: Transport) {
             "sms_unread_num", "sms_dev_unread_num", "sms_sim_unread_num", "sta_count", "m_sta_count",
             "wifi_cur_state", "SSID1", "lan_ipaddr", "wan_ipaddr", "imei", "msisdn", "ziccid",
             "cr_version", "cstm_sw_version", "hw_version",
+            "data_volume_limit_switch", "data_volume_limit_unit", "data_volume_limit_size", "data_volume_alert_percent",
+            "fota_new_version_state", "puknumber", "pinnumber",
         )
         val WIFI_CMDS = listOf(
             "SSID1", "AuthMode", "WPAPSK1_encode", "WPAPSK1_enaes", "WPAPSK1", "rnum_js", "imei",

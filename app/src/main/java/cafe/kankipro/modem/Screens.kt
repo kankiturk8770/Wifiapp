@@ -33,6 +33,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Reply
+import androidx.compose.material.icons.automirrored.filled.Forward
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.BatteryChargingFull
@@ -61,6 +64,7 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Pin
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Router
 import androidx.compose.material.icons.filled.Schedule
@@ -286,6 +290,7 @@ private fun HomeScreen(st: AppState) {
                 Text("ارتباط با مودم قطع است. به وای‌فای مودم وصلی؟", color = K.text, fontSize = 13.sp)
             }
         }
+        SimCard(st, s)
         // The one big moment of the app: signal as waves, the connect button in the middle.
         Box(Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {
             WaveDish(level, if (connected) signalColor else K.dim, Modifier.fillMaxSize())
@@ -332,6 +337,10 @@ private fun HomeScreen(st: AppState) {
             Divider()
             NavRow(Icons.Filled.MarkEmailUnread, K.pink, "پیامک تازه", "${unread(s)}") { st.tab = Tab.SMS }
         }
+        if (s.s("fota_new_version_state").let { it == "has_critical" || it == "has_optional" || it == "already_has_pkg" }) {
+            Group { NavRow(Icons.Filled.SystemUpdate, K.good, "نسخهٔ تازهٔ نرم‌افزار مودم آمده", "ببین") { st.open("update") } }
+        }
+        LimitBar(st, s)
         Group(title = "مصرف") {
             InfoRow("این اتصال", Codec.bytes(sum(s.s("realtime_rx_bytes"), s.s("realtime_tx_bytes"))))
             Divider()
@@ -344,6 +353,75 @@ private fun HomeScreen(st: AppState) {
     }
     if (askOff) Ask("اینترنت قطع شود؟", "همهٔ دستگاه‌های وصل به مودم بی‌اینترنت می‌شوند.", "قطع کن", danger = true,
         onYes = { st.run("اینترنت مودم قطع شد") { connect(false) } }, onNo = { askOff = false })
+}
+
+/** SIM needs a PIN / PUK, or is missing: the same checks as the modem's "sim_abnormal" page. */
+@Composable
+private fun SimCard(st: AppState, s: JSONObject) {
+    val state = s.s("modem_main_state")
+    if (state.isEmpty() || state == "modem_init_complete") return
+    var code by remember { mutableStateOf("") }
+    var pin1 by remember { mutableStateOf("") }
+    var pin2 by remember { mutableStateOf("") }
+    val digits = { v: String, n: Int -> v.filter { it.isDigit() }.take(n) }
+    Group(title = "سیم‌کارت") {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            when (state) {
+                "modem_waitpin" -> {
+                    Text("سیم‌کارت PIN می‌خواهد. ${s.s("pinnumber")} فرصت باقی است.", color = K.warn, lineHeight = 22.sp)
+                    Field("PIN", code, { code = digits(it, 8) }, password = true, number = true)
+                    MainButton("باز کن", enabled = code.length in 4..8, icon = Icons.Filled.Lock) { st.run("سیم‌کارت باز شد", "PIN اشتباه است") { enterPin(code) }; code = "" }
+                }
+                "modem_waitpuk" -> {
+                    Text("سیم‌کارت قفل شده و کد PUK (روی کارت سیم‌کارت) می‌خواهد. ${s.s("puknumber")} فرصت باقی است.", color = K.bad, lineHeight = 22.sp)
+                    Field("PUK", code, { code = digits(it, 8) }, password = true, number = true)
+                    Field("PIN تازه", pin1, { pin1 = digits(it, 8) }, password = true, number = true)
+                    Field("تکرار PIN تازه", pin2, { pin2 = digits(it, 8) }, password = true, number = true, error = pin2.isNotEmpty() && pin2 != pin1)
+                    MainButton("باز کن", enabled = code.length == 8 && pin1.length in 4..8 && pin1 == pin2, icon = Icons.Filled.Lock) {
+                        st.run("سیم‌کارت باز شد", "PUK اشتباه است") { enterPuk(code, pin1) }; code = ""
+                    }
+                }
+                "modem_sim_undetected", "modem_undetected" -> Text("سیم‌کارت پیدا نشد. مودم را خاموش کن و سیم‌کارت را درست بگذار.", color = K.bad, lineHeight = 22.sp)
+                "modem_sim_destroy", "modem_destroy" -> Text("سیم‌کارت خراب یا برای همیشه قفل است (PUK تمام شد). باید از اپراتور سیم‌کارت تازه بگیری.", color = K.bad, lineHeight = 22.sp)
+                "modem_imsi_waitnck" -> Text("سیم‌کارت با این مودم قفل شبکه دارد.", color = K.bad)
+                else -> Text("سیم‌کارت در حال آماده شدن است…", color = K.dim)
+            }
+        }
+    }
+}
+
+/** Monthly limit, when the owner set one (statusBar / main page of the modem do the same). */
+@Composable
+private fun LimitBar(st: AppState, s: JSONObject) {
+    if (s.s("data_volume_limit_switch") != "1") return
+    val byData = s.s("data_volume_limit_unit") != "time"
+    val (used, total) = if (byData) {
+        val p = s.s("data_volume_limit_size").split("_")
+        val mb = (p.getOrNull(0)?.toDoubleOrNull() ?: 0.0) * (p.getOrNull(1)?.toDoubleOrNull() ?: 1.0)
+        ((s.s("monthly_rx_bytes").toDoubleOrNull() ?: 0.0) + (s.s("monthly_tx_bytes").toDoubleOrNull() ?: 0.0)) to mb * 1048576
+    } else (s.s("monthly_time").toDoubleOrNull() ?: 0.0) to (s.s("data_volume_limit_size").toDoubleOrNull() ?: 0.0) * 3600
+    if (total <= 0) return
+    val f = (used / total).toFloat().coerceIn(0f, 1f)
+    val alert = (s.s("data_volume_alert_percent").toFloatOrNull() ?: 100f) / 100f
+    val color = when { used >= total -> K.bad; f >= alert -> K.warn; else -> K.good }
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(K.card).border(BorderStroke(1.dp, K.line), RoundedCornerShape(22.dp))
+            .clickable { st.open("limit") }.padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("سقف ماهانه", color = K.dim, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            Text(
+                if (byData) "${Codec.iso(Codec.bytes(used.toString()))} از ${Codec.iso(Codec.bytes(total.toString()))}"
+                else "${Codec.duration(used.toLong().toString())} از ${Codec.duration(total.toLong().toString())}",
+                color = K.text, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(K.line)) {
+            Box(Modifier.fillMaxWidth(f).height(10.dp).clip(RoundedCornerShape(5.dp)).background(color))
+        }
+        if (f >= alert) Text(if (used >= total) "سقف ماهانه تمام شد." else "به ${(alert * 100).toInt()}٪ سقف رسیدی.", color = color, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+    }
 }
 
 @Composable
@@ -430,6 +508,8 @@ private fun WifiMain(st: AppState, w: JSONObject, reload: () -> Unit) {
     val maxAll = w.s("MAX_Station_num").toIntOrNull()?.coerceIn(1, 32) ?: 32
     var max by remember(w) { mutableStateOf(w.s("MAX_Access_num").ifEmpty { "10" }) }
     var ask by remember { mutableStateOf(false) }
+    var qr by remember { mutableStateOf(false) }
+    if (qr) WifiQrDialog(w.s("SSID1"), w.s("password"), w.s("AuthMode"), w.s("HideSSID") == "1") { qr = false }
     val modes = listOf(
         "OPEN" to "بدون رمز (همه وصل می‌شوند)",
         "WPA2PSK" to "WPA2 (پیشنهادی)",
@@ -449,12 +529,49 @@ private fun WifiMain(st: AppState, w: JSONObject, reload: () -> Unit) {
         Choice("حداکثر دستگاه هم‌زمان", (1..maxAll).map { "$it" to "$it" }, max) { max = it }
         Group { SwitchRow("مخفی کردن اسم", "در فهرست وای‌فای گوشی‌ها دیده نمی‌شود", hidden) { hidden = it } }
         MainButton("ذخیره", enabled = ssidOk && passOk) { ask = true }
+        GhostButton("کد QR وای‌فای", Icons.Filled.QrCode2) { qr = true }
     }
     if (ask) Ask("ذخیره شود؟", "وای‌فای چند ثانیه قطع می‌شود و همهٔ دستگاه‌ها، این گوشی هم، باید دوباره وصل شوند.", "ذخیره کن",
         onYes = { st.run("ذخیره شد. اگر رمز را عوض کردی، با رمز تازه دوباره وصل شو", then = reload) { saveWifi(ssid, pass, mode, hidden, max, w) } },
         onNo = { ask = false })
     if (askOff) Ask("وای‌فای خاموش شود؟", "همهٔ دستگاه‌ها قطع می‌شوند و این برنامه هم دیگر به مودم نمی‌رسد تا وای‌فای را با دکمهٔ خود مودم یا کابل روشن کنی.", "خاموش کن", danger = true,
         onYes = { st.run("وای‌فای خاموش شد", then = reload) { setWifiOn(false, w.s("m_ssid_enable")) } }, onNo = { askOff = false })
+}
+
+/** The standard Wi-Fi QR text that phone cameras understand. */
+fun wifiQrText(ssid: String, pass: String, auth: String, hidden: Boolean): String {
+    fun esc(v: String) = v.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace(":", "\\:").replace("\"", "\\\"")
+    val t = if (auth == "OPEN") "nopass" else "WPA"
+    return "WIFI:T:$t;S:${esc(ssid)};" + (if (t != "nopass") "P:${esc(pass)};" else "") + (if (hidden) "H:true;" else "") + ";"
+}
+
+@Composable
+private fun WifiQrDialog(ssid: String, pass: String, auth: String, hidden: Boolean, onClose: () -> Unit) {
+    val text = wifiQrText(ssid, pass, auth, hidden)
+    val matrix = remember(text) {
+        runCatching {
+            com.google.zxing.qrcode.QRCodeWriter().encode(text, com.google.zxing.BarcodeFormat.QR_CODE, 0, 0, mapOf(com.google.zxing.EncodeHintType.CHARACTER_SET to "UTF-8", com.google.zxing.EncodeHintType.MARGIN to 1))
+        }.getOrNull()
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("وصل شدن با دوربین") },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                if (matrix != null) Canvas(Modifier.size(240.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(12.dp)) {
+                    val cell = size.width / matrix.width
+                    for (y in 0 until matrix.height) for (x in 0 until matrix.width) if (matrix.get(x, y)) {
+                        drawRect(Color.Black, Offset(x * cell, y * cell), Size(cell + 0.5f, cell + 0.5f))
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(ssid, color = K.text, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("با دوربین گوشی دیگر این کد را اسکن کن تا بدون زدن رمز وصل شود.", color = K.dim, fontSize = 13.sp, textAlign = TextAlign.Center)
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("بستن", color = K.ice) } },
+        containerColor = K.raised,
+    )
 }
 
 // ---------------- devices ----------------
@@ -547,73 +664,143 @@ private fun DeviceRow(d: Device, isMe: Boolean, onEdit: () -> Unit, onBlock: () 
 
 // ---------------- SMS ----------------
 
+/** What the compose window starts with (reply, forward, a draft, or a contact's number). */
+data class Compose(val to: String = "", val text: String = "", val draftId: String? = null)
+
 @Composable
 private fun SmsScreen(st: AppState) {
     var ver by remember { mutableIntStateOf(0) }
-    var box by remember { mutableIntStateOf(0) } // 0 inbox, 1 sent, 2 SIM
-    var writing by remember { mutableStateOf(false) }
+    var box by remember { mutableIntStateOf(0) } // 0 inbox, 1 sent, 2 drafts, 3 SIM
     var open by remember { mutableStateOf<String?>(null) }
     var del by remember { mutableStateOf<Sms?>(null) }
+    var delAll by remember { mutableStateOf<List<String>?>(null) }
+    val ctx = LocalContext.current
     Box(Modifier.fillMaxSize()) {
         Page {
             Heading("پیامک", null) {
                 IconButton(onClick = { ver++ }) { Icon(Icons.Filled.Refresh, "تازه کن", tint = K.text) }
             }
-            Segments(listOf("دریافتی", "ارسالی", "سیم‌کارت"), box) { box = it; open = null }
-            Load(st, ver to box, { if (box == 2) sms(0) else sms(1) }) { all, _ ->
+            Segments(listOf("دریافتی", "ارسالی", "پیش‌نویس", "سیم‌کارت"), box) { box = it; open = null }
+            Load(st, ver to box, { (if (box == 3) sms(0) else sms(1)) to smsCapacity() }) { (all, cap), _ ->
                 val list = when (box) {
                     0 -> all.filter { !it.sent && !it.draft }
                     1 -> all.filter { it.sent }
+                    2 -> all.filter { it.draft }
                     else -> all.filter { !it.draft }
                 }
-                if (list.isEmpty()) Empty(if (box == 1) "هنوز پیامکی نفرستاده‌ای." else "پیامکی نیست.")
-                else Group {
-                    list.forEachIndexed { i, m ->
-                        if (i > 0) Divider()
-                        SmsRow(m, open == m.id, onClick = {
-                            open = if (open == m.id) null else m.id
-                            if (m.unread) st.quiet { markRead(m.id) }
-                        }, onDelete = { del = m })
+                val total = cap.optString(if (box == 3) "sms_sim_total" else "sms_nv_total").toIntOrNull() ?: 0
+                val used = if (box == 3) cap.optString("sms_sim_rev_total").toIntOrNull()?.plus(cap.optString("sms_sim_send_total").toIntOrNull() ?: 0) ?: 0
+                else listOf("sms_nv_rev_total", "sms_nv_send_total", "sms_nv_draftbox_total").sumOf { cap.optString(it).toIntOrNull() ?: 0 }
+                if (total > 0) Room(used, total, if (box == 3) "حافظهٔ سیم‌کارت" else "حافظهٔ پیامک مودم")
+                if (list.isEmpty()) Empty(when (box) { 1 -> "هنوز پیامکی نفرستاده‌ای."; 2 -> "پیش‌نویسی نیست."; else -> "پیامکی نیست." })
+                else {
+                    Group {
+                        list.forEachIndexed { i, m ->
+                            if (i > 0) Divider()
+                            SmsRow(
+                                m, open == m.id,
+                                onClick = {
+                                    if (m.draft) st.compose = Compose(m.number, m.text, m.id)
+                                    else {
+                                        open = if (open == m.id) null else m.id
+                                        if (m.unread) st.quiet { markRead(m.id) }
+                                    }
+                                },
+                                onReply = { st.compose = Compose(m.number) },
+                                onForward = { st.compose = Compose(text = m.text) },
+                                onCopy = {
+                                    (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("sms", m.text))
+                                    st.message = "متن کپی شد"
+                                },
+                                onDelete = { del = m },
+                            )
+                        }
                     }
+                    GhostButton("پاک کردن همهٔ این بخش (${list.size})", Icons.Filled.Delete, K.bad) { delAll = list.map { it.id } }
                 }
             }
             Spacer(Modifier.height(70.dp))
         }
         androidx.compose.material3.ExtendedFloatingActionButton(
-            onClick = { writing = true },
+            onClick = { st.compose = Compose() },
             icon = { Icon(Icons.AutoMirrored.Filled.Send, null) },
             text = { Text("پیامک تازه", fontWeight = FontWeight.Bold) },
             containerColor = K.blue, contentColor = Color.White,
             modifier = Modifier.align(Alignment.BottomStart).padding(16.dp),
         )
     }
-    if (writing) {
-        var number by remember { mutableStateOf("") }
-        var text by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { writing = false },
-            title = { Text("پیامک تازه") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Field("شماره", number, { v -> number = v.filter { it.isDigit() || it == '+' } }, ltr = true, number = true)
-                    Field("متن", text, { text = it }, singleLine = false, modifier = Modifier.heightIn(min = 110.dp))
-                    Text("${text.length} حرف" + if (text.length > 70) " (چند پیامک می‌شود)" else "", color = K.dim, fontSize = 12.sp)
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = { writing = false; st.run("پیامک فرستاده شد", "پیامک فرستاده نشد", then = { box = 1; ver++ }) { sendSms(number, text) } },
-                    enabled = number.length >= 3 && text.isNotBlank(),
-                ) { Text("بفرست", color = K.ice, fontWeight = FontWeight.Bold) }
-            },
-            dismissButton = { TextButton(onClick = { writing = false }) { Text("لغو", color = K.dim) } },
-            containerColor = K.raised,
-        )
-    }
+    st.compose?.let { c -> ComposeDialog(st, c) { sentOrSaved -> st.compose = null; if (sentOrSaved != null) { box = sentOrSaved; ver++ } } }
     del?.let { m ->
         Ask("پیامک پاک شود؟", m.text.take(120), "پاک کن", danger = true,
             onYes = { st.run("پاک شد", "پاک نشد", then = { ver++ }) { deleteSms(m.id) } }, onNo = { del = null })
     }
+    delAll?.let { ids ->
+        Ask("همه پاک شوند؟", "${ids.size} پیامک این بخش برای همیشه پاک می‌شود.", "همه را پاک کن", danger = true,
+            onYes = { st.run("پاک شد", "پاک نشد", then = { ver++ }) { deleteSmsMany(ids) } }, onNo = { delAll = null })
+    }
+}
+
+/** A thin bar: how full a memory is. */
+@Composable
+fun Room(used: Int, total: Int, label: String) {
+    val f = if (total > 0) (used.toFloat() / total).coerceIn(0f, 1f) else 0f
+    val color = when { f >= 0.95f -> K.bad; f >= 0.8f -> K.warn; else -> K.blue }
+    Column {
+        Row {
+            Text(label, color = K.dim, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            Text("$used از $total", color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(6.dp))
+        Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(K.line)) {
+            Box(Modifier.fillMaxWidth(f).height(6.dp).clip(RoundedCornerShape(3.dp)).background(color))
+        }
+        if (f >= 0.95f) Text("حافظه پر است؛ پیامک تازه نمی‌رسد تا چند تا را پاک کنی.", color = K.bad, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+/** done(box) = which tab to show after (1 sent, 2 drafts), or null when closed. */
+@Composable
+private fun ComposeDialog(st: AppState, c: Compose, done: (Int?) -> Unit) {
+    var to by remember(c) { mutableStateOf(c.to) }
+    var text by remember(c) { mutableStateOf(c.text) }
+    val numbers = splitNumbers(to)
+    AlertDialog(
+        onDismissRequest = { done(null) },
+        title = { Text(if (c.draftId != null) "پیش‌نویس" else "پیامک تازه") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Field("شماره", to, { v -> to = v.filter { it.isDigit() || it in "+*#;، ," } }, ltr = true, number = true,
+                    hint = "برای چند نفر، شماره‌ها را با ; جدا کن")
+                Field("متن", text, { text = it }, singleLine = false, modifier = Modifier.heightIn(min = 110.dp))
+                // UCS-2: 70 letters in one SMS, 67 per part when it is longer.
+                val parts = if (text.length <= 70) 1 else (text.length + 66) / 67
+                Text("${text.length} حرف، $parts پیامک" + if (numbers.size > 1) "، برای ${numbers.size} نفر" else "", color = K.dim, fontSize = 12.sp)
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = numbers.isNotEmpty() && text.isNotBlank(),
+                onClick = {
+                    done(null)
+                    st.run(if (numbers.size > 1) "به ${numbers.size} نفر فرستاده شد" else "پیامک فرستاده شد", "پیامک فرستاده نشد", then = { done(1) }) {
+                        val sent = sendSmsMany(numbers, text)
+                        if (sent == numbers.size && c.draftId != null) deleteSms(c.draftId)
+                        sent == numbers.size
+                    }
+                },
+            ) { Text("بفرست", color = K.ice, fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = {
+            Row {
+                if (c.draftId == null) TextButton(enabled = text.isNotBlank(), onClick = {
+                    done(null)
+                    st.run("در پیش‌نویس ذخیره شد", "ذخیره نشد", then = { done(2) }) { saveDraft(numbers, text) }
+                }) { Text("پیش‌نویس", color = K.ice) }
+                TextButton(onClick = { done(null) }) { Text("بستن", color = K.dim) }
+            }
+        },
+        containerColor = K.raised,
+    )
 }
 
 @Composable
@@ -627,20 +814,23 @@ fun Segments(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) {
                 Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(if (on) K.blue else Color.Transparent)
                     .clickable { onSelect(i) }.padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center,
-            ) { Text(l, color = if (on) Color.White else K.dim, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, fontSize = 14.sp) }
+            ) { Text(l, color = if (on) Color.White else K.dim, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, fontSize = 13.sp, maxLines = 1) }
         }
     }
 }
 
 @Composable
-private fun SmsRow(m: Sms, expanded: Boolean, onClick: () -> Unit, onDelete: () -> Unit) {
+private fun SmsRow(m: Sms, expanded: Boolean, onClick: () -> Unit, onReply: () -> Unit, onForward: () -> Unit, onCopy: () -> Unit, onDelete: () -> Unit) {
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconTile(if (m.sent) Icons.AutoMirrored.Filled.Send else Icons.Filled.Sms, when { m.failed -> K.bad; m.sent -> K.cyan; m.unread -> K.blue; else -> K.dim }, 32)
+            IconTile(
+                when { m.draft -> Icons.Filled.Edit; m.sent -> Icons.AutoMirrored.Filled.Send; else -> Icons.Filled.Sms },
+                when { m.failed -> K.bad; m.draft -> K.warn; m.sent -> K.cyan; m.unread -> K.blue; else -> K.dim }, 32,
+            )
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Ltr { Text(m.number, color = K.text, fontWeight = if (m.unread) FontWeight.Black else FontWeight.Bold) }
+                    Ltr { Text(m.number.ifEmpty { "بی‌شماره" }, color = K.text, fontWeight = if (m.unread) FontWeight.Black else FontWeight.Bold) }
                     if (m.failed) { Spacer(Modifier.width(6.dp)); Pill("فرستاده نشد", K.bad) }
                     if (m.unread) { Spacer(Modifier.width(6.dp)); Pill("تازه", K.blue) }
                 }
@@ -649,11 +839,21 @@ private fun SmsRow(m: Sms, expanded: Boolean, onClick: () -> Unit, onDelete: () 
         }
         Spacer(Modifier.height(6.dp))
         Text(m.text, color = if (m.unread || expanded) K.text else K.dim, lineHeight = 22.sp, maxLines = if (expanded) Int.MAX_VALUE else 2)
-        if (expanded) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = onDelete) {
-                Icon(Icons.Filled.Delete, null, tint = K.bad); Spacer(Modifier.width(4.dp)); Text("پاک کن", color = K.bad)
-            }
+        if (expanded) Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            if (!m.sent && m.number.any { it.isDigit() }) SmallAction(Icons.AutoMirrored.Filled.Reply, "پاسخ", K.ice, onReply)
+            if (m.failed) SmallAction(Icons.Filled.Refresh, "دوباره", K.ice, onReply)
+            SmallAction(Icons.AutoMirrored.Filled.Forward, "بفرست برای…", K.ice, onForward)
+            SmallAction(Icons.Filled.ContentCopy, "کپی", K.ice, onCopy)
+            Spacer(Modifier.weight(1f))
+            SmallAction(Icons.Filled.Delete, "پاک", K.bad, onDelete)
         }
+    }
+}
+
+@Composable
+private fun SmallAction(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, color: Color, onClick: () -> Unit) {
+    TextButton(onClick = onClick, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)) {
+        Icon(icon, null, tint = color, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text(text, color = color, fontSize = 13.sp)
     }
 }
 
@@ -755,6 +955,9 @@ private fun SettingsScreen(st: AppState) {
             if (x.s("cstm_webui_simswitch") == "1" && (x.s("sim_switch_number").toIntOrNull() ?: 0) > 1) {
                 Divider(); NavRow(Icons.Filled.SimCard, K.blue, "انتخاب سیم‌کارت") { st.open("simswitch") }
             }
+            if (x.s("cstm_webui_unlocksim") == "1") { Divider(); NavRow(Icons.Filled.Lock, K.bad, "باز کردن قفل سیم‌کارت") { st.open("simlock") } }
+            Divider()
+            NavRow(Icons.Filled.Language, K.violet, "زبان صفحهٔ مودم") { st.open("lang") }
             Divider()
             NavRow(Icons.Filled.SystemUpdate, K.good, "به‌روزرسانی نرم‌افزار مودم") { st.open("update") }
         }

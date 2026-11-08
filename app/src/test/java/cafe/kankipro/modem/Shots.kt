@@ -42,6 +42,9 @@ private class ShowModem : Transport {
         "pinnumber" to "3", "puknumber" to "10", "sntp_time_set_mode" to "auto", "sntp_year" to "2026", "sntp_month" to "11", "sntp_day" to "8",
         "sntp_hour" to "5", "sntp_minute" to "12", "sntp_timezone" to "<+0330>-3:30<+0430>,J80/0,J264/0", "sntp_timezone_index" to "0", "sntp_dst_enable" to "0",
         "mgmt_quicken_power_on" to "1", "keep_alive_enable" to "1", "ping_detect_url1" to "8.8.8.8", "ping_detect_url2" to "1.1.1.1",
+        "Language" to "fa", "support_languages" to "en+fa+ar", "fota_updateMode" to "1", "fota_updateIntervalDay" to "7",
+        "fota_allowRoamingUpdate" to "0", "dm_last_check_time" to "2026-11-07 21:40", "sntp_static_server0" to "time.nist.gov",
+        "sntp_static_server1" to "pool.ntp.org", "sntp_server0" to "pool.ntp.org", "sntp_server1" to "Other", "sntp_other_server1" to "ir.pool.ntp.org",
         "ussd_enable" to "1", "cstm_webui_dns" to "1", "dns_manual_enable" to "0",
     )
 
@@ -132,4 +135,6 @@ class Shots {
     @Test fun pageTime() = page("time")
     @Test fun pagePassword() = page("password")
     @Test fun pageUpdate() = page("update")
+    @Test fun pageLang() = page("lang")
+    @Test fun homeSimPin() = shot(state().apply { status = JSONObject(status.toString()).put("modem_main_state", "modem_waitpin").put("pinnumber", "3") })
 }

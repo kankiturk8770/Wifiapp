@@ -14,7 +14,7 @@ private fun ok(r: JSONObject): Boolean = r.optString("result").let { it == "succ
 fun ModemApi.extraFunc(): JSONObject = get(
     "cstm_webui_imei,cstm_webui_ttl,cstm_webui_dns,cstm_webui_bandselect,ussd_enable,vpn_enable," +
         "dns_manual_func_enable,tr069_func_enable,cstm_webui_restartplan,cstm_wifi_sleep,cstm_webui_local_update," +
-        "cstm_webui_simswitch,sim_switch_number",
+        "cstm_webui_simswitch,sim_switch_number,cstm_webui_unlocksim",
 )
 
 // ---------------- internet ----------------
@@ -409,7 +409,17 @@ fun ModemApi.ussd(code: String, reply: Boolean): Ussd {
 
 fun ModemApi.ussdCancel() = runCatching { setOk("USSD_PROCESS", listOf("USSD_operator" to "ussd_cancel")) }.getOrDefault(false)
 
-data class Contact(val id: String, val name: String, val number: String, val onSim: Boolean, val group: String)
+/** group: common / family / friend / colleague (only for contacts kept in the modem). */
+data class Contact(
+    val id: String,
+    val name: String,
+    val number: String,
+    val onSim: Boolean,
+    val group: String,
+    val home: String = "",
+    val office: String = "",
+    val email: String = "",
+)
 
 /** phonebook: every contact (SIM and modem). */
 fun ModemApi.contacts(): List<Contact> {
@@ -423,8 +433,18 @@ fun ModemApi.contacts(): List<Contact> {
             number = o.s("pbm_number"),
             onSim = o.s("pbm_location") == "0",
             group = o.s("pbm_group"),
+            home = o.s("pbm_anr"),
+            office = o.s("pbm_anr1"),
+            email = Codec.ucs2Decode(o.s("pbm_email")),
         )
     }
+}
+
+/** pbm_capacity_info for the SIM or the modem: used and total. */
+fun ModemApi.contactRoom(sim: Boolean): Pair<Int, Int> {
+    val d = get("pbm_capacity_info", multi = false, extra = "&pbm_location=" + if (sim) "pbm_sim" else "pbm_native")
+    return if (sim) (d.s("pbm_sim_used_record_num").toIntOrNull() ?: 0) to (d.s("pbm_sim_max_record_num").toIntOrNull() ?: 0)
+    else (d.s("pbm_dev_used_record_num").toIntOrNull() ?: 0) to (d.s("pbm_dev_max_record_num").toIntOrNull() ?: 0)
 }
 
 private fun ModemApi.pbmDone(): Boolean {
@@ -438,22 +458,75 @@ private fun ModemApi.pbmDone(): Boolean {
     return false
 }
 
-/** index -1 = new contact. onSim: stored on the SIM card, else in the modem. */
-fun ModemApi.saveContact(index: String, name: String, number: String, onSim: Boolean): Boolean {
+/** index -1 = new contact. Moving between SIM and modem sends the old id as delId, like the page. */
+fun ModemApi.saveContact(c: Contact, wasOnSim: Boolean?): Boolean {
     val p = mutableListOf(
-        "notCallback" to "true", "location" to if (onSim) "0" else "1",
-        "name" to Codec.ucs2Encode(name), "mobilephone_num" to number,
+        "notCallback" to "true", "location" to if (c.onSim) "0" else "1",
+        "name" to Codec.ucs2Encode(c.name), "mobilephone_num" to c.number,
     )
-    if (onSim) p += "edit_index" to index
+    val moved = wasOnSim != null && wasOnSim != c.onSim
+    val index = if (moved) "-1" else c.id
+    if (c.onSim) p += "edit_index" to index
     else p += listOf(
-        "add_index_pc" to index, "homephone_num" to "", "officephone_num" to "", "email" to "", "groupchoose" to "common",
+        "add_index_pc" to index, "homephone_num" to c.home, "officephone_num" to c.office,
+        "email" to Codec.ucs2Encode(c.email), "groupchoose" to c.group.ifEmpty { "common" },
     )
+    if (moved) p += "delId" to c.id
     return setOk("PBM_CONTACT_ADD", p) && pbmDone()
 }
 
 fun ModemApi.deleteContacts(ids: List<String>) = setOk(
     "PBM_CONTACT_DEL", listOf("notCallback" to "true", "del_option" to "delete_num", "delete_id" to ids.joinToString(",")),
 ) && pbmDone()
+
+/** location 0 = SIM, 1 = modem. */
+fun ModemApi.deleteAllContacts(location: Int) = setOk(
+    "PBM_CONTACT_DEL", listOf("notCallback" to "true", "del_option" to "delete_all", "del_all_location" to location.toString()),
+) && pbmDone()
+
+// ---------------- more SMS (sms_list) ----------------
+
+/** Save as a draft (SAVE_SMS), then wait for sms_cmd 5. */
+fun ModemApi.saveDraft(numbers: List<String>, text: String) = setOk(
+    "SAVE_SMS",
+    listOf(
+        "notCallback" to "true", "SMSMessage" to Codec.ucs2Encode(text), "SMSNumber" to numbers.joinToString(";") + ";",
+        "Index" to "-1", "encode_type" to "UNICODE", "sms_time" to Codec.smsTime(), "draft_group_id" to "",
+    ),
+) && smsDone(5)
+
+/** The page sends one message per number, one after the other. */
+fun ModemApi.sendSmsMany(numbers: List<String>, text: String): Int = numbers.count { sendSms(it, text) }
+
+fun splitNumbers(raw: String): List<String> =
+    raw.split(';', ',', '،', ' ', '\n').map { it.trim() }.filter { it.length >= 3 }.distinct()
+
+// ---------------- SIM lock and PIN at start (sim_abnormal, adm_others) ----------------
+
+fun ModemApi.simState(): JSONObject = get("modem_main_state,pinnumber,puknumber,pin_status")
+
+fun ModemApi.simLock(): JSONObject = get("sim_lock_status,cstm_webui_unlocksim,sim_unlock_nck_time")
+
+fun ModemApi.unlockSim(code: String) = setOk("GORORM_UNLOCK_SIM", listOf("notCallback" to "true", "sim_unlock_code" to code))
+
+// ---------------- other small things ----------------
+
+/** The band the modem is on right now (shown in the modem page's device info). */
+fun ModemApi.band(): String = get("GET_RESIDE_BAND", multi = false).s("result").takeIf { it != "band_invalid" } ?: ""
+
+/** Language of the modem's own web page. */
+fun ModemApi.webLanguage(): Pair<String, List<String>> {
+    val cur = get("Language").s("Language").ifEmpty { "en" }
+    val sup = get("support_languages").s("support_languages").split("+").filter { it.isNotBlank() }
+    return cur to sup
+}
+fun ModemApi.setWebLanguage(lang: String) = setOk("SET_WEB_LANGUAGE", listOf("Language" to lang))
+
+/** ota_update settings. */
+fun ModemApi.otaSettings(): JSONObject = get("fota_updateMode,fota_updateIntervalDay,fota_allowRoamingUpdate,dm_last_check_time")
+fun ModemApi.setOtaSettings(mode: String, days: String, roaming: Boolean) = setOk(
+    "SetUpgAutoSetting", listOf("UpgMode" to mode, "UpgIntervalDay" to days, "UpgRoamPermission" to if (roaming) "1" else "0"),
+)
 
 // ---------------- device ----------------
 
@@ -468,16 +541,19 @@ fun ModemApi.sntp(): JSONObject = get(
 )
 
 /** adm_others "apply": zone is "<timezone>_<index>" as in the modem's own list. */
-fun ModemApi.setSntp(auto: Boolean, s: JSONObject, zone: String, dst: String, y: Int, mo: Int, d: Int, h: Int, mi: Int): Boolean {
+fun ModemApi.setSntp(
+    auto: Boolean, s: JSONObject, zone: String, dst: String, y: Int, mo: Int, d: Int, h: Int, mi: Int,
+    servers: List<String> = listOf(s.s("sntp_server0"), s.s("sntp_server1"), s.s("sntp_server2")),
+    others: List<String> = listOf(s.s("sntp_other_server0"), s.s("sntp_other_server1"), s.s("sntp_other_server2")),
+): Boolean {
     val tz = zone.substringBeforeLast('_')
     val idx = zone.substringAfterLast('_', "0")
     val r = set(
         "SNTP",
         listOf(
             "manualsettime" to if (auto) "auto" else "manual",
-            "sntp_server1_ip" to s.s("sntp_server0"), "sntp_server2_ip" to s.s("sntp_server1"), "sntp_server3_ip" to s.s("sntp_server2"),
-            "sntp_other_server0" to s.s("sntp_other_server0"), "sntp_other_server1" to s.s("sntp_other_server1"),
-            "sntp_other_server2" to s.s("sntp_other_server2"),
+            "sntp_server1_ip" to servers[0], "sntp_server2_ip" to servers[1], "sntp_server3_ip" to servers[2],
+            "sntp_other_server0" to others[0], "sntp_other_server1" to others[1], "sntp_other_server2" to others[2],
             "timezone" to tz, "sntp_timezone_index" to idx, "DaylightEnabled" to dst,
             "time_year" to y.toString(), "time_month" to mo.toString(), "time_day" to d.toString(),
             "time_hour" to h.toString(), "time_minute" to mi.toString(),

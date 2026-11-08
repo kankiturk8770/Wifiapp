@@ -224,3 +224,39 @@ class SmsWatchTest {
         assertEquals(listOf("1:6", "0:5"), fresh.map { SmsWatch.key(it) })
     }
 }
+
+class MoreFeaturesTest {
+    @Test fun wifiQrIsEscaped() {
+        // Raw string: each backslash below is one real backslash.
+        assertEquals("""WIFI:T:WPA;S:My\;Net;P:a\:b\\c;;""", wifiQrText("My;Net", """a:b\c""", "WPA2PSK", false))
+        assertEquals("WIFI:T:nopass;S:Cafe;H:true;;", wifiQrText("Cafe", "x", "OPEN", true))
+    }
+
+    @Test fun numbersAreSplit() {
+        assertEquals(listOf("0912", "+90532", "*140#"), splitNumbers("0912; +90532، *140#;0912;1"))
+    }
+
+    @Test fun draftIsSavedLikeThePage() {
+        val m = Recorder(singles = mapOf("sms_cmd_status_info" to """{"sms_cmd_status_result":"3"}"""))
+        assertTrue(ModemApi(m).saveDraft(listOf("0912", "0935"), "سلام"))
+        val p = m.posts.last()
+        assertEquals("SAVE_SMS", p["goformId"]); assertEquals("0912;0935;", p["SMSNumber"]); assertEquals(Codec.ucs2Encode("سلام"), p["SMSMessage"])
+    }
+
+    @Test fun movingAContactToTheSimSendsDelId() {
+        val m = Recorder(singles = mapOf("pbm_write_flag" to """{"pbm_write_flag":"0"}"""))
+        ModemApi(m).saveContact(Contact("7", "Ali", "0912", onSim = true, group = "family"), wasOnSim = false)
+        val p = m.posts.last()
+        assertEquals("0", p["location"]); assertEquals("-1", p["edit_index"]); assertEquals("7", p["delId"])
+        ModemApi(m).saveContact(Contact("-1", "Sara", "0935", false, "friend", home = "021", email = "s@x.io"), wasOnSim = null)
+        val q = m.posts.last()
+        assertEquals("friend", q["groupchoose"]); assertEquals("021", q["homephone_num"]); assertEquals(Codec.ucs2Encode("s@x.io"), q["email"]); assertEquals(null, q["delId"])
+    }
+
+    @Test fun calibrationSendsMegabytes() {
+        val m = Recorder()
+        ModemApi(m).calibrate(true, "2048")
+        val p = m.posts.last()
+        assertEquals("FLOW_CALIBRATION_MANUAL", p["goformId"]); assertEquals("data", p["calibration_way"]); assertEquals("2048", p["data"])
+    }
+}
