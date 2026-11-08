@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SettingsInputAntenna
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -87,6 +88,14 @@ fun PageHost(st: AppState, name: String) {
         "simswitch" -> SimSwitchPage(st, back)
         "update" -> UpdatePage(st, back)
         "lang" -> LanguagePage(st, back)
+        "urlfilter" -> UrlFilterPage(st, back)
+        "guest" -> GuestPage(st, back)
+        "bands" -> BandPage(st, back)
+        "vpn" -> VpnPage(st, back)
+        "ddns" -> DdnsPage(st, back)
+        "tr069" -> Tr069Page(st, back)
+        "at" -> AtPage(st, back)
+        "usbmac" -> UsbMacPage(st, back)
         "simlock" -> SimLockPage(st, back)
         else -> SubPage("—", back) { Empty("این صفحه پیدا نشد.") }
     }
@@ -335,16 +344,27 @@ private fun WifiAdvancedPage(st: AppState, back: () -> Unit) {
             val cList = buildList { countries?.keys()?.forEach { k -> if (k != "NONE") add(k to "${countries.optString(k)} ($k)") } }.sortedBy { it.second }
             val ch = channels(st, country)
             val rs = rates(mode)
-            Choice("حالت", listOf("4" to "802.11 b/g/n", "2" to "فقط 802.11 n"), mode) { mode = it; rate = "0" }
+            var band by remember(d) { mutableStateOf(d.s("wifi_band")) }
+            var width by remember(d) { mutableStateOf(d.s("wifi_11n_cap")) }
+            if (band.isNotEmpty()) Segments(listOf("2.4 GHz", "5 GHz"), if (band == "a") 1 else 0) { band = if (it == 1) "a" else "b"; mode = "4"; channel = "0"; rate = "0" }
+            if (band == "a") Text("روی ۵ گیگاهرتز سرعت بیشتر ولی برد کمتر است؛ کانال را خود مودم انتخاب می‌کند.", color = K.dim, fontSize = 12.sp)
+            Choice(
+                "حالت",
+                if (band == "a") listOf("5" to "فقط 802.11 a", "2" to "فقط 802.11 n", "4" to "802.11 a/n") else listOf("4" to "802.11 b/g/n", "2" to "فقط 802.11 n"),
+                mode,
+            ) { mode = it; rate = "0" }
             Choice("کشور", cList, country) { country = it; channel = "0" }
-            Choice("کانال", ch, if (ch.any { it.first == channel }) channel else "0") { channel = it }
-            Choice("سرعت", rs, if (rs.any { it.first == rate }) rate else "0") { rate = it }
+            if (band != "a") {
+                Choice("کانال", ch, if (ch.any { it.first == channel }) channel else "0") { channel = it }
+                Choice("سرعت", rs, if (rs.any { it.first == rate }) rate else "0") { rate = it }
+            }
+            if (width.isNotEmpty()) Choice("پهنای کانال", listOf("0" to "20 MHz", "1" to "20/40 MHz"), width) { width = it }
             if (d.s("WscModeOption") == "1") Text("WPS روشن است؛ مودم تا تمام شدن WPS این بخش را عوض نمی‌کند.", color = K.warn, fontSize = 13.sp)
             MainButton("ذخیره", enabled = d.s("WscModeOption") != "1") { ask = true }
             if (ask) Ask("ذخیره شود؟", "وای‌فای چند ثانیه قطع و دوباره وصل می‌شود.", "ذخیره کن",
                 onYes = {
                     st.run("ذخیره شد", then = reload) {
-                        setWifiAdvance(mode, country, channel, rateText(rate), d.s("MAX_Access_num"), d.s("m_MAX_Access_num").ifEmpty { "0" })
+                        setWifiAdvance(mode, country, channel, rateText(rate), d.s("MAX_Access_num"), d.s("m_MAX_Access_num").ifEmpty { "0" }, band, width)
                     }
                 },
                 onNo = { ask = false })
@@ -1061,6 +1081,210 @@ private fun SimLockPage(st: AppState, back: () -> Unit) = SubPage("باز کرد
             var code by remember { mutableStateOf("") }
             Field("کد باز کردن", code, { code = it.trim().take(32) }, ltr = true)
             MainButton("باز کن", enabled = code.isNotEmpty()) { st.run("قفل باز شد", "کد اشتباه است", then = reload) { unlockSim(code) } }
+        }
+    }
+}
+
+// ---------------- pages turned on by the modem's js/ext/set.js ----------------
+
+@Composable
+private fun UrlFilterPage(st: AppState, back: () -> Unit) {
+    var ver by remember { mutableIntStateOf(0) }
+    var add by remember { mutableStateOf("") }
+    SubPage("فیلتر سایت", back, "سایت‌هایی که در این فهرست باشند از هیچ دستگاهی که به مودم وصل است باز نمی‌شوند. حداکثر ۱۰ سایت.") {
+        Load(st, ver, { urlFilters() }) { list, _ ->
+            if (list.isEmpty()) Empty("فهرست خالی است.")
+            else Group(title = "${list.size} سایت بسته") {
+                list.forEachIndexed { i, u ->
+                    if (i > 0) Divider()
+                    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Ltr { Text(u, color = K.text, modifier = Modifier.weight(1f)) }
+                        IconButton(onClick = { st.run("پاک شد", then = { ver++ }) { deleteUrlFilters(listOf(i)) } }) { Icon(Icons.Filled.Delete, "پاک کردن", tint = K.bad) }
+                    }
+                }
+            }
+            if (list.size < 10) {
+                Field("آدرس سایت", add, { add = it.trim().take(32) }, ltr = true, hint = "مثل example.com")
+                val ok = add.length >= 3 && add.none { it == ';' || it == ' ' } && list.none { it.equals(add, true) }
+                MainButton("افزودن", enabled = ok, icon = Icons.Filled.Add) { st.run("اضافه شد", then = { ver++; add = "" }) { addUrlFilter(add) } }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GuestPage(st: AppState, back: () -> Unit) {
+    var ask by remember { mutableStateOf(false) }
+    SubPage("شبکهٔ مهمان", back, "یک وای‌فای دوم با اسم و رمز جدا برای مهمان‌ها؛ رمز اصلی را لازم ندارند.") {
+        Load(st, 0, { guestWifi() }) { w, reload ->
+            val on = w.s("m_ssid_enable") == "1"
+            Group {
+                SwitchRow("شبکهٔ مهمان روشن", null, on, icon = Icons.Filled.Wifi, tint = K.violet) { v ->
+                    st.run(if (v) "شبکهٔ مهمان روشن شد" else "شبکهٔ مهمان خاموش شد", then = reload) { setGuestOn(v) }
+                }
+            }
+            if (on) {
+                var ssid by remember(w) { mutableStateOf(w.s("m_SSID")) }
+                var pass by remember(w) { mutableStateOf(w.s("password")) }
+                var mode by remember(w) { mutableStateOf(w.s("m_AuthMode").ifEmpty { "WPA2PSK" }) }
+                var hidden by remember(w) { mutableStateOf(w.s("m_HideSSID") == "1") }
+                var isolate by remember(w) { mutableStateOf(w.s("m_NoForwarding") == "1") }
+                val maxAll = w.s("MAX_Station_num").toIntOrNull()?.coerceIn(1, 32) ?: 32
+                var max by remember(w) { mutableStateOf(w.s("m_MAX_Access_num").ifEmpty { "5" }) }
+                val ssidOk = ssid.toByteArray().size in 1..32
+                val passOk = mode == "OPEN" || pass.length in 8..63
+                Field("اسم شبکهٔ مهمان", ssid, { ssid = it }, error = !ssidOk)
+                Choice("نوع امنیت", listOf("OPEN" to "بدون رمز", "WPA2PSK" to "WPA2 (پیشنهادی)", "WPAPSKWPA2PSK" to "WPA / WPA2"), mode) { mode = it }
+                if (mode != "OPEN") Field("رمز", pass, { pass = it }, password = true, ltr = true, error = !passOk, hint = "۸ تا ۶۳ حرف")
+                Choice("حداکثر دستگاه", (1..maxAll).map { "$it" to "$it" }, max) { max = it }
+                Group {
+                    SwitchRow("مخفی کردن اسم", null, hidden) { hidden = it }
+                    Divider()
+                    SwitchRow("جدا کردن مهمان‌ها", "دستگاه‌های مهمان همدیگر و شبکهٔ اصلی را نبینند", isolate) { isolate = it }
+                }
+                MainButton("ذخیره", enabled = ssidOk && passOk) { ask = true }
+                if (ask) Ask("ذخیره شود؟", "شبکهٔ مهمان چند ثانیه قطع می‌شود.", "ذخیره کن",
+                    onYes = { st.run("ذخیره شد", then = reload) { saveGuest(ssid, pass, mode, hidden, max, isolate, w.s("m_show_qrcode_flag")) } },
+                    onNo = { ask = false })
+            }
+        }
+    }
+}
+
+@Composable
+private fun BandPage(st: AppState, back: () -> Unit) {
+    var ask by remember { mutableStateOf(false) }
+    SubPage("انتخاب باند", back, "مودم فقط روی باندهای تیک‌خورده وصل می‌شود. اگر نمی‌دانی، همه را روشن بگذار.") {
+        NeedsOffline(st)
+        Load(st, 0, { bands() }) { (all, chosen), reload ->
+            if (all.isEmpty()) { Empty("مودم فهرست باند نداد."); return@Load }
+            val on = remember(chosen) { mutableStateListOf<String>().apply { addAll(chosen) } }
+            Group(title = "${all.size} باند") {
+                all.forEachIndexed { i, b ->
+                    if (i > 0) Divider()
+                    SwitchRow(b, null, b in on) { v -> if (v) on += b else on -= b }
+                }
+            }
+            GhostButton("همه") { on.clear(); on.addAll(all) }
+            MainButton("ذخیره", enabled = on.isNotEmpty()) { ask = true }
+            if (ask) Ask("ذخیره شود؟", "اتصال مودم چند لحظه قطع و دوباره وصل می‌شود.", "ذخیره کن",
+                onYes = { st.run("ذخیره شد", then = reload) { setBands(all.filter { it in on }) } }, onNo = { ask = false })
+        }
+    }
+}
+
+@Composable
+private fun VpnPage(st: AppState, back: () -> Unit) = SubPage("VPN مودم", back, "خود مودم به یک سرور L2TP یا PPTP وصل می‌شود و همهٔ دستگاه‌ها از آن رد می‌شوند.") {
+    Load(st, 0, { vpn() }) { d, reload ->
+        val open = d.s("vpn_state") == "open"
+        val cs = d.s("connect_status")
+        Group {
+            InfoRow(
+                "وضعیت",
+                when { !open -> "خاموش"; cs == "connected" -> "وصل"; cs == "setting" -> "در حال وصل شدن…"; else -> "وصل نشد" },
+                when { !open -> K.dim; cs == "connected" -> K.good; cs == "setting" -> K.warn; else -> K.bad },
+            )
+        }
+        var type by remember(d) { mutableStateOf(d.s("vpn_type").ifEmpty { "l2tp" }) }
+        var server by remember(d) { mutableStateOf(d.s("vpn_server_ip")) }
+        var user by remember(d) { mutableStateOf(d.s("vpn_name")) }
+        var pass by remember(d) { mutableStateOf(d.s("vpn_password")) }
+        val busy = cs == "connected" || cs == "setting"
+        Choice("نوع", listOf("l2tp" to "L2TP", "pptp" to "PPTP"), type, enabled = !busy) { type = it }
+        Field("آدرس سرور", server, { server = it.trim() }, ltr = true, enabled = !busy)
+        Field("نام کاربری", user, { user = it.trim() }, ltr = true, enabled = !busy)
+        Field("رمز", pass, { pass = it }, ltr = true, password = true, enabled = !busy)
+        if (busy) MainButton("قطع VPN", color = K.bad, icon = null) { st.run("VPN قطع شد", then = reload) { closeVpn() } }
+        else MainButton("وصل کن", enabled = server.isNotEmpty() && user.isNotEmpty()) { st.run("دستور وصل شدن رفت", then = reload) { openVpn(user, pass, server, type) } }
+        GhostButton("تازه کردن وضعیت", Icons.Filled.Refresh) { reload() }
+    }
+}
+
+@Composable
+private fun DdnsPage(st: AppState, back: () -> Unit) = SubPage("DDNS", back, "یک اسم ثابت (مثل myhome.ddns.net) که همیشه به IP اینترنت مودم اشاره کند.") {
+    Load(st, 0, { ddns() }) { d, reload ->
+        var on by remember(d) { mutableStateOf(d.s("DDNS_Enable") == "1") }
+        var mode by remember(d) { mutableStateOf(d.s("DDNS_Mode").ifEmpty { "auto" }) }
+        var prov by remember(d) { mutableStateOf(d.s("DDNSProvider").ifEmpty { "dyndns.org" }) }
+        var host by remember(d) { mutableStateOf(d.s("DDNS")) }
+        var user by remember(d) { mutableStateOf(d.s("DDNSAccount")) }
+        var pass by remember(d) { mutableStateOf(d.s("DDNSPassword")) }
+        var hash by remember(d) { mutableStateOf(d.s("DDNS_Hash_Value")) }
+        val provs = st.options.optJSONArray("DDNSDDP")?.let { a -> (0 until a.length()).map { a.getJSONObject(it).optString("value") to a.getJSONObject(it).optString("name").replace("None", "هیچ") } }
+            ?: listOf("dyndns.org" to "dyndns.org", "no-ip.com" to "no-ip.com", "none" to "هیچ")
+        Group { SwitchRow("DDNS روشن", null, on) { on = it } }
+        if (on) {
+            Choice("سرویس", provs, prov) { prov = it }
+            Choice("به‌روزرسانی", listOf("auto" to "خودکار", "manual" to "دستی"), mode) { mode = it }
+            if (prov != "none") {
+                Field("اسم (دامنه)", host, { host = it.trim() }, ltr = true)
+                Field("نام کاربری", user, { user = it.trim() }, ltr = true)
+                Field("رمز", pass, { pass = it }, ltr = true, password = true)
+            }
+            if (prov == "freedns.afraid.org") Field("Hash", hash, { hash = it.trim() }, ltr = true)
+        }
+        MainButton("ذخیره", enabled = !on || prov == "none" || (host.isNotEmpty() && user.isNotEmpty())) {
+            st.run("ذخیره شد", then = reload) { setDdns(on, mode, prov, host, user, pass, hash) }
+        }
+    }
+}
+
+@Composable
+private fun Tr069Page(st: AppState, back: () -> Unit) = SubPage("TR-069", back, "مدیریت مودم از راه دور توسط اپراتور (ACS). اگر اپراتور چیزی نگفته، خاموش بماند.") {
+    Load(st, 0, { tr069() }) { d, reload ->
+        var on by remember(d) { mutableStateOf(d.s("tr069_enable") == "1") }
+        var url by remember(d) { mutableStateOf(d.s("tr069_acs_url")) }
+        var au by remember(d) { mutableStateOf(d.s("tr069_acs_username")) }
+        var ap by remember(d) { mutableStateOf(d.s("tr069_acs_password")) }
+        var inform by remember(d) { mutableStateOf(d.s("tr069_inform_enable") == "1") }
+        var every by remember(d) { mutableStateOf(d.s("tr069_inform_interval")) }
+        var auth by remember(d) { mutableStateOf(d.s("tr069_cpe_auth_enable") == "1") }
+        var cu by remember(d) { mutableStateOf(d.s("tr069_cpe_username")) }
+        var cp by remember(d) { mutableStateOf(d.s("tr069_cpe_password")) }
+        Group { SwitchRow("TR-069 روشن", null, on) { on = it } }
+        if (on) {
+            Field("آدرس ACS", url, { url = it.trim() }, ltr = true)
+            Field("نام کاربری ACS", au, { au = it.trim() }, ltr = true)
+            Field("رمز ACS", ap, { ap = it }, ltr = true, password = true)
+            Group { SwitchRow("گزارش دوره‌ای", null, inform) { inform = it } }
+            if (inform) Field("هر چند ثانیه", every, { v -> every = v.filter { it.isDigit() }.take(7) }, ltr = true, number = true)
+            Group { SwitchRow("درخواست وصل شدن با رمز", null, auth) { auth = it } }
+            if (auth) {
+                Field("نام کاربری مودم", cu, { cu = it.trim() }, ltr = true)
+                Field("رمز مودم", cp, { cp = it }, ltr = true, password = true)
+            }
+        }
+        MainButton("ذخیره") { st.run("ذخیره شد", then = reload) { setTr069(on, url, au, ap, inform, every, auth, cu, cp) } }
+    }
+}
+
+@Composable
+private fun AtPage(st: AppState, back: () -> Unit) {
+    var cmd by remember { mutableStateOf("") }
+    val log = remember { mutableStateListOf<String>() }
+    val scope = rememberCoroutineScope()
+    SubPage("دستور AT", back, "دستور مستقیم به تراشهٔ 4G، برای کاربر حرفه‌ای. مثلاً AT+CSQ (قدرت آنتن) یا AT+COPS? (اپراتور). دستور اشتباه می‌تواند مودم را از کار بیندازد.") {
+        Field("دستور", cmd, { cmd = it.take(100) }, ltr = true, hint = "باید با AT شروع شود")
+        MainButton("بفرست", enabled = cmd.trim().uppercase().startsWith("AT")) {
+            val c = cmd
+            scope.launch { val r = st.io { atCommand(c) }; log.add(0, "> $c\n" + r.getOrElse { st.netError(it) }) }
+            cmd = ""
+        }
+        if (log.isNotEmpty()) Group {
+            Ltr { Text(log.joinToString("\n\n"), color = K.text, fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.padding(14.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun UsbMacPage(st: AppState, back: () -> Unit) = SubPage("MAC کارت USB", back, "شناسهٔ کارت شبکه‌ای که مودم وقتی با کابل USB به کامپیوتر وصل است نشان می‌دهد. بعد از ذخیره، مودم ری‌استارت می‌شود.") {
+    Load(st, 0, { usbMac() }) { cur, _ ->
+        val shown = cur.takeIf { it != "FFFFFFFFFFFF" && it != "00000000000" && it.isNotEmpty() } ?: "00A0C6000000"
+        var mac by remember(cur) { mutableStateOf(shown) }
+        Field("MAC (۱۲ حرف، بدون :)", mac, { v -> mac = v.filter { it.isLetterOrDigit() }.uppercase().take(12) }, ltr = true,
+            error = !Regex("^[0-9A-F]{12}$").matches(mac))
+        MainButton("ذخیره و ری‌استارت", enabled = Regex("^[0-9A-F]{12}$").matches(mac) && mac != shown) {
+            st.run("ذخیره شد؛ مودم ری‌استارت می‌شود") { setUsbMac(mac) }
         }
     }
 }

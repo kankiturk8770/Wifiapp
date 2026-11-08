@@ -182,13 +182,18 @@ fun ModemApi.setWifiOn(on: Boolean, multiSsid: String): Boolean =
 fun ModemApi.wifiAdvance(): JSONObject =
     get("WirelessMode,CountryCode,Channel,HT_MCS,wifi_band,wifi_11n_cap,MAX_Access_num,m_MAX_Access_num,MAX_Station_num,wifi_sta_connection,WscModeOption")
 
-fun ModemApi.setWifiAdvance(mode: String, country: String, channel: String, rate: String, max: String, mMax: String) = setOk(
-    "SET_WIFI_INFO",
-    listOf(
-        "wifiMode" to mode, "countryCode" to country, "MAX_Access_num" to max, "m_MAX_Access_num" to mMax,
-        "selectedChannel" to channel, "abg_rate" to rate,
-    ),
-)
+/** service.setWifiAdvance: on 5 GHz ("a") the modem picks the channel itself and gets no rate. */
+fun ModemApi.setWifiAdvance(
+    mode: String, country: String, channel: String, rate: String, max: String, mMax: String,
+    band: String = "", width: String = "",
+): Boolean {
+    val p = mutableListOf("wifiMode" to mode, "countryCode" to country, "MAX_Access_num" to max, "m_MAX_Access_num" to mMax)
+    if (band.isNotEmpty()) p += "wifi_band" to band
+    if (band == "a") p += "selectedChannel" to "auto"
+    else { p += "selectedChannel" to channel; p += "abg_rate" to rate }
+    if (width.isNotEmpty()) p += "wifi_11n_cap" to width
+    return setOk("SET_WIFI_INFO", p)
+}
 
 /** wifi_sleep_mode. */
 fun ModemApi.sleepAndRange(): JSONObject = get("Sleep_interval,wifi_coverage")
@@ -605,3 +610,94 @@ fun ModemApi.deviceInfo(): JSONObject = get(
     "imei,ziccid,imsi,sim_imsi,cr_version,cstm_sw_version,hw_version,mac_address,msisdn,lan_ipaddr,wan_ipaddr," +
         "ipv6_wan_ipaddr,LocalDomain,wifi_coverage,MAX_Access_num",
 )
+
+// ---------------- pages turned on by the modem's js/ext/set.js ----------------
+
+/** firewall_url_filter: websURLFilters is "a.com;b.com". */
+fun ModemApi.urlFilters(): List<String> =
+    get("websURLFilters", multi = false).s("websURLFilters").split(";").filter { it.isNotBlank() }
+fun ModemApi.addUrlFilter(url: String) = setOk("URL_FILTER_ADD", listOf("addURLFilter" to url))
+fun ModemApi.deleteUrlFilters(index: List<Int>) = setOk("URL_FILTER_DELETE", listOf("url_filter_delete_id" to index.joinToString(";") + ";"))
+
+/** wifi_guest: the second network (SSID2). */
+fun ModemApi.guestWifi(): JSONObject {
+    val w = get(
+        "m_ssid_enable,wifi_cur_state,m_SSID,m_HideSSID,m_NoForwarding,m_MAX_Access_num,m_AuthMode,m_EncrypType," +
+            "m_WPAPSK1_encode,m_WPAPSK1_enaes,rnum_js,imei,MAX_Station_num,MAX_Access_num,m_show_qrcode_flag",
+    )
+    val pass = when {
+        w.s("m_WPAPSK1_encode").isNotEmpty() -> runCatching { String(java.util.Base64.getDecoder().decode(w.s("m_WPAPSK1_encode"))) }.getOrDefault("")
+        w.s("m_WPAPSK1_enaes").isNotEmpty() -> runCatching { Codec.modemAesOpen(w.s("rnum_js"), w.s("imei"), w.s("m_WPAPSK1_enaes")) }.getOrDefault("")
+        else -> ""
+    }
+    return w.put("password", pass)
+}
+
+/** service.setWifiBasicMultiSSIDSwitch: guest network on/off (main Wi-Fi stays on). */
+fun ModemApi.setGuestOn(on: Boolean) = setOk("SET_WIFI_INFO", listOf("m_ssid_enable" to if (on) "1" else "0", "wifiEnabled" to "1"))
+
+/** service.setWifiBasic4SSID2 (SET_WIFI_SSID2_SETTINGS). */
+fun ModemApi.saveGuest(ssid: String, pass: String, auth: String, hidden: Boolean, max: String, isolate: Boolean, qr: String): Boolean {
+    val cipher = if (auth == "WPA2PSK" || auth == "WPA3Personal" || auth == "WPA2WPA3") "1" else "2"
+    val p = mutableListOf(
+        "m_SSID" to ssid, "m_HideSSID" to if (hidden) "1" else "0", "m_MAX_Access_num" to max, "m_AuthMode" to auth,
+        "cipher" to cipher, "m_NoForwarding" to if (isolate) "1" else "0", "m_show_qrcode_flag" to qr.ifEmpty { "0" },
+    )
+    if (auth == "OPEN") p += "m_EncrypType" to "NONE"
+    else { p += "m_EncrypType" to cipher; p += "m_WPAPSK1" to secret(pass) }
+    return setOk("SET_WIFI_SSID2_SETTINGS", p)
+}
+
+/** band_selection: get_support_band is {band: 0/1}; set_band_list "" means all. */
+fun ModemApi.bands(): Pair<List<String>, List<String>> {
+    val sup = get("get_support_band", multi = false)
+    // org.json does not keep the modem's order: sort as people read them (B1, B3, B20; LTE before WCDMA).
+    val names = sup.keys().asSequence().filter { k -> sup.s(k) != "0" && k != "result" }.toList()
+        .sortedWith(compareBy({ it.replace(Regex("\\d+\$"), "") }, { Regex("(\\d+)\$").find(it)?.value?.toIntOrNull() ?: 0 }))
+    val set = get("set_band_list", multi = false).s("set_band_list").split(",").filter { it.isNotBlank() }
+    return names to set.ifEmpty { names }
+}
+fun ModemApi.setBands(list: List<String>) = setOk("GOFORM_SET_BAND", listOf("band_list" to list.joinToString(",")))
+
+/** vpn: an L2TP / PPTP client inside the modem. */
+fun ModemApi.vpn(): JSONObject = get("vpn_name,vpn_password,vpn_server_ip,vpn_state,vpn_type,vpn_mode,connect_status,vpn_status")
+fun ModemApi.openVpn(name: String, pass: String, server: String, type: String) = setOk(
+    "GOFORM_OPEN_VPN", listOf("vpn_name" to name, "vpn_password" to pass, "vpn_server_ip" to server, "vpn_type" to type),
+)
+fun ModemApi.closeVpn() = setOk("GOFORM_CLOSE_VPN")
+
+/** ddns. */
+fun ModemApi.ddns(): JSONObject = get("DDNS_Enable,DDNS_Mode,DDNSProvider,DDNSAccount,DDNSPassword,DDNS,DDNS_Hash_Value")
+fun ModemApi.setDdns(on: Boolean, mode: String, provider: String, host: String, user: String, pass: String, hash: String): Boolean {
+    val p = mutableListOf("DDNS_Enable" to if (on) "1" else "0")
+    if (on) {
+        p += "DDNS_Mode" to mode
+        p += "DDNSProvider" to provider
+        if (provider != "none") p += listOf("DDNS" to host, "DDNSPassword" to pass, "DDNSAccount" to user)
+        if (provider == "freedns.afraid.org") p += "DDNS_Hash_Value" to hash
+    }
+    return setOk("DDNS", p)
+}
+
+/** tr069 (remote management by the operator). */
+fun ModemApi.tr069(): JSONObject = get(
+    "tr069_enable,tr069_acs_username,tr069_acs_password,tr069_acs_url,tr069_inform_enable,tr069_inform_interval," +
+        "tr069_cpe_auth_enable,tr069_cpe_username,tr069_cpe_password",
+)
+fun ModemApi.setTr069(on: Boolean, acsUrl: String, acsUser: String, acsPass: String, inform: Boolean, interval: String, auth: Boolean, cpeUser: String, cpePass: String) = setOk(
+    "GORORM_SET_TR069",
+    listOf(
+        "tr069enanble" to if (on) "1" else "0", "tr069AcsName" to acsUser, "tr069AcsPassword" to acsPass, "tr069AcsAddress" to acsUrl,
+        "tr069InformEnable" to if (inform) "1" else "0", "tr069InformInterval" to interval,
+        "tr069AuthEnable" to if (auth) "1" else "0", "tr069CpeName" to cpeUser, "tr069CpePassword" to cpePass,
+    ),
+)
+
+/** adm_others: an AT command to the 4G chip; the answer is in "result". */
+fun ModemApi.atCommand(cmd: String): String {
+    val r = set("EXECUTE_AT_COMMAND", listOf("at_cmd" to cmd.replace(Regex("\\s"), "").uppercase()))
+    return r.s("result").ifEmpty { r.toString() }
+}
+
+fun ModemApi.usbMac(): String = get("usb_net_mac_addr").s("usb_net_mac_addr")
+fun ModemApi.setUsbMac(mac: String) = setOk("SET_USB_MAC_ADDRESS", listOf("mac" to mac))

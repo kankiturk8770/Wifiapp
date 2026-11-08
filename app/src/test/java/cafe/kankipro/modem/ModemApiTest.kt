@@ -260,3 +260,44 @@ class MoreFeaturesTest {
         assertEquals("FLOW_CALIBRATION_MANUAL", p["goformId"]); assertEquals("data", p["calibration_way"]); assertEquals("2048", p["data"])
     }
 }
+
+class ExtPagesTest {
+    @Test fun urlFilterLikeThePage() {
+        val m = Recorder(singles = mapOf("websURLFilters" to """{"websURLFilters":"a.com;b.com"}"""))
+        val api = ModemApi(m)
+        assertEquals(listOf("a.com", "b.com"), api.urlFilters())
+        api.addUrlFilter("c.com"); assertEquals("c.com", m.posts.last()["addURLFilter"])
+        api.deleteUrlFilters(listOf(0, 1)); assertEquals("0;1;", m.posts.last()["url_filter_delete_id"])
+    }
+
+    @Test fun guestSaveEncodesPassword() {
+        val m = Recorder()
+        ModemApi(m).saveGuest("Guest", "12345678", "WPA2PSK", false, "5", true, "")
+        val p = m.posts.last()
+        assertEquals("SET_WIFI_SSID2_SETTINGS", p["goformId"]); assertEquals(Codec.b64("12345678"), p["m_WPAPSK1"])
+        assertEquals("1", p["m_EncrypType"]); assertEquals("1", p["m_NoForwarding"]); assertEquals("0", p["m_HideSSID"])
+    }
+
+    @Test fun bandsDefaultToAllWhenListIsEmpty() {
+        val m = Recorder(singles = mapOf(
+            "get_support_band" to """{"B1":"1","B3":"1","B7":"0","B20":"1"}""",
+            "set_band_list" to """{"set_band_list":""}""",
+        ))
+        val (all, on) = ModemApi(m).bands()
+        assertEquals(listOf("B1", "B3", "B20"), all); assertEquals(all, on)
+        ModemApi(m).setBands(listOf("B3", "B20")); assertEquals("B3,B20", m.posts.last()["band_list"])
+    }
+
+    @Test fun fiveGhzLetsTheModemPickTheChannel() {
+        val m = Recorder()
+        ModemApi(m).setWifiAdvance("4", "TR", "6", "54", "10", "0", band = "a")
+        val p = m.posts.last()
+        assertEquals("auto", p["selectedChannel"]); assertEquals(null, p["abg_rate"]); assertEquals("a", p["wifi_band"])
+    }
+
+    @Test fun vpnOpenSendsAllFields() {
+        val m = Recorder()
+        ModemApi(m).openVpn("u", "p", "1.2.3.4", "l2tp")
+        assertEquals(mapOf("isTest" to "false", "goformId" to "GOFORM_OPEN_VPN", "vpn_name" to "u", "vpn_password" to "p", "vpn_server_ip" to "1.2.3.4", "vpn_type" to "l2tp"), m.posts.last())
+    }
+}

@@ -45,6 +45,9 @@ private class ShowModem : Transport {
         "Language" to "fa", "support_languages" to "en+fa+ar", "fota_updateMode" to "1", "fota_updateIntervalDay" to "7",
         "fota_allowRoamingUpdate" to "0", "dm_last_check_time" to "2026-11-07 21:40", "sntp_static_server0" to "time.nist.gov",
         "sntp_static_server1" to "pool.ntp.org", "sntp_server0" to "pool.ntp.org", "sntp_server1" to "Other", "sntp_other_server1" to "ir.pool.ntp.org",
+        "m_ssid_enable" to "1", "m_SSID" to "Kanki-Guest", "m_AuthMode" to "WPA2PSK", "m_WPAPSK1_encode" to "Z3Vlc3QxMjM0", "m_MAX_Access_num" to "5",
+        "vpn_state" to "open", "connect_status" to "connected", "vpn_type" to "l2tp", "vpn_server_ip" to "vpn.example.com", "vpn_name" to "kanki",
+        "wifi_band" to "b", "wifi_11n_cap" to "1",
         "ussd_enable" to "1", "cstm_webui_dns" to "1", "dns_manual_enable" to "0",
     )
 
@@ -74,6 +77,9 @@ private class ShowModem : Transport {
             "sms_parameter_info" -> """{"sms_para_sca":"+905329000111","sms_para_validity_period":"167","sms_para_status_report":"0"}"""
             "sms_capacity_info" -> """{"sms_nv_total":"100","sms_nv_rev_total":"12","sms_nv_send_total":"4","sms_nv_draftbox_total":"0","sms_sim_total":"40","sms_sim_rev_total":"2"}"""
             "upnpEnabled" -> """{"upnpEnabled":"1"}"""
+            "websURLFilters" -> """{"websURLFilters":"instagram.com;tiktok.com"}"""
+            "get_support_band" -> """{"LTE_B1":"1","LTE_B3":"1","LTE_B7":"1","LTE_B20":"1","WCDMA_B1":"1"}"""
+            "set_band_list" -> """{"set_band_list":"LTE_B3,LTE_B7"}"""
             else -> JSONObject().apply { cmd.split(",").forEach { k -> put(k, v[k] ?: "") } }.toString()
         }
     }
@@ -136,5 +142,9 @@ class Shots {
     @Test fun pagePassword() = page("password")
     @Test fun pageUpdate() = page("update")
     @Test fun pageLang() = page("lang")
+    @Test fun pageGuest() = page("guest")
+    @Test fun pageBands() = page("bands")
+    @Test fun pageVpn() = page("vpn")
+    @Test fun pageUrl() = page("urlfilter")
     @Test fun homeSimPin() = shot(state().apply { status = JSONObject(status.toString()).put("modem_main_state", "modem_waitpin").put("pinnumber", "3") })
 }

@@ -64,6 +64,13 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Pin
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Usb
+import androidx.compose.material.icons.filled.SettingsRemote
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.VpnLock
+import androidx.compose.material.icons.filled.CellTower
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Router
@@ -517,7 +524,9 @@ private fun WifiScreen(st: AppState) {
             WifiMain(st, w) { ver++; reload() }
         }
         Group(title = "بیشتر") {
-            NavRow(Icons.Filled.Speed, K.cyan, "پیشرفته (کانال، کشور، سرعت)") { st.open("wifiadv") }
+            NavRow(Icons.Filled.Groups, K.violet, "شبکهٔ مهمان") { st.open("guest") }
+            Divider()
+            NavRow(Icons.Filled.Speed, K.cyan, "پیشرفته (فرکانس، کانال، کشور، سرعت)") { st.open("wifiadv") }
             Divider()
             NavRow(Icons.Filled.Bedtime, K.violet, "خواب و برد وای‌فای") { st.open("sleep") }
             Divider()
@@ -947,6 +956,12 @@ private fun SettingsScreen(st: AppState) {
             Divider()
             NavRow(Icons.Filled.Language, K.violet, "APN") { st.open("apn") }
             Divider()
+            NavRow(Icons.Filled.CellTower, K.good, "انتخاب باند") { st.open("bands") }
+            Divider()
+            NavRow(Icons.Filled.VpnLock, K.blue, "VPN مودم (L2TP / PPTP)") { st.open("vpn") }
+            Divider()
+            NavRow(Icons.Filled.Public, K.cyan, "DDNS") { st.open("ddns") }
+            Divider()
             NavRow(Icons.Filled.DataUsage, K.warn, "سقف مصرف ماهانه") { st.open("limit") }
         }
         Group(title = "سیم‌کارت و پیام") {
@@ -959,7 +974,10 @@ private fun SettingsScreen(st: AppState) {
         }
         Group(title = "روتر و امنیت") {
             NavRow(Icons.Filled.Lan, K.blue, "شبکهٔ داخلی (LAN و DHCP)") { st.open("lan") }
-            if (x.s("cstm_webui_dns") == "1") { Divider(); NavRow(Icons.Filled.Dns, K.cyan, "DNS") { st.open("dns") } }
+            Divider()
+            NavRow(Icons.Filled.Dns, K.cyan, "DNS") { st.open("dns") }
+            Divider()
+            NavRow(Icons.Filled.Block, K.bad, "فیلتر سایت") { st.open("urlfilter") }
             Divider()
             NavRow(Icons.Filled.SwapHoriz, K.violet, "فوروارد پورت") { st.open("forward") }
             Divider()
@@ -985,15 +1003,24 @@ private fun SettingsScreen(st: AppState) {
             NavRow(Icons.Filled.FlashOn, K.warn, "روشن شدن سریع") { st.open("fastboot") }
             Divider()
             NavRow(Icons.Filled.NetworkCheck, K.good, "نگه داشتن اتصال (پینگ)") { st.open("keepalive") }
-            if (x.s("cstm_webui_ttl") == "1") { Divider(); NavRow(Icons.Filled.Timer, K.pink, "TTL") { st.open("ttl") } }
+            Divider()
+            NavRow(Icons.Filled.Timer, K.pink, "TTL") { st.open("ttl") }
             if (x.s("cstm_webui_simswitch") == "1" && (x.s("sim_switch_number").toIntOrNull() ?: 0) > 1) {
                 Divider(); NavRow(Icons.Filled.SimCard, K.blue, "انتخاب سیم‌کارت") { st.open("simswitch") }
             }
-            if (x.s("cstm_webui_unlocksim") == "1") { Divider(); NavRow(Icons.Filled.Lock, K.bad, "باز کردن قفل سیم‌کارت") { st.open("simlock") } }
+            Divider()
+            NavRow(Icons.Filled.Lock, K.bad, "باز کردن قفل سیم‌کارت") { st.open("simlock") }
             Divider()
             NavRow(Icons.Filled.Language, K.violet, "زبان صفحهٔ مودم") { st.open("lang") }
             Divider()
             NavRow(Icons.Filled.SystemUpdate, K.good, "به‌روزرسانی نرم‌افزار مودم") { st.open("update") }
+        }
+        Group(title = "حرفه‌ای", footer = "این‌ها را فقط اگر می‌دانی چه می‌کنند عوض کن.") {
+            NavRow(Icons.Filled.Terminal, K.warn, "دستور AT") { st.open("at") }
+            Divider()
+            NavRow(Icons.Filled.SettingsRemote, K.violet, "TR-069 (مدیریت از راه دور اپراتور)") { st.open("tr069") }
+            Divider()
+            NavRow(Icons.Filled.Usb, K.cyan, "MAC کارت USB") { st.open("usbmac") }
         }
         Group {
             NavRow(Icons.Filled.RestartAlt, K.warn, "ری‌استارت مودم") { ask = "reboot" }
