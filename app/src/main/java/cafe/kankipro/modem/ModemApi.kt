@@ -258,7 +258,7 @@ class ModemApi(private val net: Transport) {
         val WIFI_CMDS = listOf(
             "SSID1", "AuthMode", "WPAPSK1_encode", "WPAPSK1_enaes", "WPAPSK1", "rnum_js", "imei",
             "HideSSID", "MAX_Access_num", "MAX_Station_num", "EncrypType", "NoForwarding",
-            "wifi_cur_state", "show_qrcode_flag", "show_ssid_on_lcd",
+            "wifi_cur_state", "show_qrcode_flag", "show_ssid_on_lcd", "WscModeOption", "m_ssid_enable",
         )
     }
 }

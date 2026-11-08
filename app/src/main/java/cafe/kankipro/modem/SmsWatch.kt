@@ -100,7 +100,14 @@ class SmsWatch : Service() {
 
     /** Read unread SMS from the modem memory and the SIM, and notify each new one once. */
     private fun check(api: ModemApi) {
-        val s = api.get("sms_dev_unread_num,sms_sim_unread_num,sms_unread_num,sms_received_flag")
+        val s = api.get(
+            "sms_dev_unread_num,sms_sim_unread_num,sms_unread_num,sms_received_flag,sts_received_flag," +
+                "data_volume_limit_switch,data_volume_limit_unit,data_volume_limit_size,data_volume_alert_percent," +
+                "monthly_rx_bytes,monthly_tx_bytes,monthly_time,fota_new_version_state",
+        )
+        runCatching { checkLimit(s) }
+        runCatching { checkUpdate(s) }
+        if (s.optString("sts_received_flag").let { it.isNotEmpty() && it != "0" }) runCatching { checkReports(api) }
         val count = listOf("sms_dev_unread_num", "sms_sim_unread_num", "sms_unread_num").sumOf { s.optString(it).toIntOrNull() ?: 0 }
         val p = prefs(this)
         val seen = p.getStringSet(KEY_SEEN, emptySet())!!.toMutableSet()
@@ -113,6 +120,72 @@ class SmsWatch : Service() {
         // Remember only ids that are still unread, so the set does not grow forever.
         val keep = unread.map { key(it) }.toSet()
         p.edit().putStringSet(KEY_SEEN, (seen.filter { it in keep } + fresh.map { key(it) }).toSet()).apply()
+    }
+
+    /** Delivery reports of sent SMS (sms_status_rpt_data), as the modem page pops them up. */
+    private fun checkReports(api: ModemApi) {
+        val d = api.get("sms_status_rpt_data", multi = false, extra = "&page=0&data_per_page=10")
+        val arr = d.optJSONArray("messages") ?: return
+        val p = prefs(this)
+        val seen = p.getStringSet(KEY_REPORTS, emptySet())!!.toMutableSet()
+        val now = mutableSetOf<String>()
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            val id = o.optString("id")
+            now += id
+            if (id in seen || id.isEmpty()) continue
+            notifySimple(("r" + id).hashCode(), "گزارش پیامک", "گزارش رسیدن پیامک ارسالی به ${o.optString("number")} آمد")
+        }
+        p.edit().putStringSet(KEY_REPORTS, now).apply()
+    }
+
+    /** Monthly cap: one notice when the alert percent is reached and one when it is used up (once a month each). */
+    private fun checkLimit(s: org.json.JSONObject) {
+        if (s.optString("data_volume_limit_switch") != "1") return
+        val byData = s.optString("data_volume_limit_unit") != "time"
+        val used: Double
+        val total: Double
+        if (byData) {
+            val parts = s.optString("data_volume_limit_size").split("_")
+            total = (parts.getOrNull(0)?.toDoubleOrNull() ?: 0.0) * (parts.getOrNull(1)?.toDoubleOrNull() ?: 1.0) * 1048576
+            used = (s.optString("monthly_rx_bytes").toDoubleOrNull() ?: 0.0) + (s.optString("monthly_tx_bytes").toDoubleOrNull() ?: 0.0)
+        } else {
+            total = (s.optString("data_volume_limit_size").toDoubleOrNull() ?: 0.0) * 3600
+            used = s.optString("monthly_time").toDoubleOrNull() ?: 0.0
+        }
+        if (total <= 0) return
+        val alert = (s.optString("data_volume_alert_percent").toDoubleOrNull() ?: 100.0) / 100
+        val level = when { used >= total -> "full"; used >= total * alert -> "alert"; else -> return }
+        val c = java.util.Calendar.getInstance()
+        val key = "${c.get(java.util.Calendar.YEAR)}-${c.get(java.util.Calendar.MONTH)}-$level"
+        val p = prefs(this)
+        if (p.getString("limit_$level", "") == key) return
+        p.edit().putString("limit_$level", key).apply()
+        notifySimple(
+            ID_LIMIT, "سقف مصرف ماهانه",
+            if (level == "full") "سقف مصرف این ماه تمام شد." else "مصرف این ماه به ${(alert * 100).toInt()}٪ سقف رسید.",
+        )
+    }
+
+    /** New modem software (fota_new_version_state), once per state. */
+    private fun checkUpdate(s: org.json.JSONObject) {
+        val v = s.optString("fota_new_version_state")
+        val p = prefs(this)
+        val has = v == "has_critical" || v == "has_optional" || v == "already_has_pkg"
+        if (!has) { p.edit().remove(KEY_FOTA).apply(); return }
+        if (p.getString(KEY_FOTA, "") == v) return
+        p.edit().putString(KEY_FOTA, v).apply()
+        notifySimple(ID_FOTA, "به‌روزرسانی مودم", if (v == "has_critical") "نسخهٔ تازه و مهم نرم‌افزار مودم آمده است." else "نسخهٔ تازهٔ نرم‌افزار مودم آمده است.")
+    }
+
+    private fun notifySimple(id: Int, title: String, text: String) {
+        if (!canNotify(this)) return
+        nm(this).notify(
+            id,
+            builder(this, CH_SMS).setSmallIcon(R.drawable.ic_sms).setContentTitle(title).setContentText(text)
+                .setStyle(Notification.BigTextStyle().bigText(text))
+                .setContentIntent(open(this, null)).setAutoCancel(true).build(),
+        )
     }
 
     private fun notifySms(m: Sms) {
@@ -149,6 +222,10 @@ class SmsWatch : Service() {
         const val CH_WATCH = "watch"
         const val KEY_ON = "notify"
         private const val KEY_SEEN = "notified"
+        private const val KEY_REPORTS = "reports"
+        private const val KEY_FOTA = "fota_seen"
+        private const val ID_LIMIT = 3
+        private const val ID_FOTA = 4
         const val KEY_BAD = "bad_pass"
 
         fun key(m: Sms) = "${m.store}:${m.id}"
@@ -188,8 +265,12 @@ class SmsWatch : Service() {
 
         private fun builder(c: Context, ch: String) = Notification.Builder(c, ch)
 
-        private fun openSms(c: Context): PendingIntent = PendingIntent.getActivity(
-            c, 7, Intent(c, MainActivity::class.java).putExtra("tab", "sms").addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+        private fun openSms(c: Context): PendingIntent = open(c, "sms")
+
+        private fun open(c: Context, tab: String?): PendingIntent = PendingIntent.getActivity(
+            c, if (tab == null) 8 else 7,
+            Intent(c, MainActivity::class.java).apply { if (tab != null) putExtra("tab", tab) }
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 

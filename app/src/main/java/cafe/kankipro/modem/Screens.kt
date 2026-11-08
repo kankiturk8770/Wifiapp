@@ -279,6 +279,8 @@ private fun HomeScreen(st: AppState) {
     val level = s.s("signalbar").toIntOrNull() ?: 0
     val signalColor = when { level <= 1 -> K.bad; level <= 2 -> K.warn; else -> K.good }
     var askOff by remember { mutableStateOf(false) }
+    var askOn by remember { mutableStateOf<String?>(null) }
+    val roaming = s.s("simcard_roam") == "Internal" || s.s("simcard_roam") == "International"
     Page {
         if (st.offline) {
             Row(
@@ -298,7 +300,15 @@ private fun HomeScreen(st: AppState) {
             Box(
                 Modifier.size(104.dp).clip(CircleShape).background(if (connected) K.blue else K.card)
                     .border(BorderStroke(3.dp, ring), CircleShape)
-                    .clickable(enabled = !st.busy && !busy) { if (connected) askOff = true else st.run("دستور وصل شدن رفت") { connect(true) } },
+                    .clickable(enabled = !st.busy && !busy) {
+                        when {
+                            connected -> askOff = true
+                            // Same two questions the modem page asks before it connects.
+                            roaming -> askOn = "roam"
+                            overLimit(s) -> askOn = "limit"
+                            else -> st.run("دستور وصل شدن رفت") { connect(true) }
+                        }
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -350,6 +360,14 @@ private fun HomeScreen(st: AppState) {
             Divider()
             NavRow(Icons.Filled.DataUsage, K.warn, "سقف مصرف ماهانه") { st.open("limit") }
         }
+    }
+    askOn?.let { why ->
+        Ask(
+            if (why == "roam") "در رومینگ وصل شود؟" else "سقف ماهانه تمام شده؛ وصل شود؟",
+            if (why == "roam") "سیم‌کارت بیرون از شبکهٔ اپراتور خودش است و اینترنت می‌تواند خیلی گران باشد." else "مصرف این ماه از سقفی که گذاشته‌ای گذشته است.",
+            "وصل شو", danger = true,
+            onYes = { st.run("دستور وصل شدن رفت") { connect(true) } }, onNo = { askOn = null },
+        )
     }
     if (askOff) Ask("اینترنت قطع شود؟", "همهٔ دستگاه‌های وصل به مودم بی‌اینترنت می‌شوند.", "قطع کن", danger = true,
         onYes = { st.run("اینترنت مودم قطع شد") { connect(false) } }, onNo = { askOff = false })
@@ -421,6 +439,19 @@ private fun LimitBar(st: AppState, s: JSONObject) {
             Box(Modifier.fillMaxWidth(f).height(10.dp).clip(RoundedCornerShape(5.dp)).background(color))
         }
         if (f >= alert) Text(if (used >= total) "سقف ماهانه تمام شد." else "به ${(alert * 100).toInt()}٪ سقف رسیدی.", color = color, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+    }
+}
+
+/** True when this month's use is past the cap (data or time). */
+private fun overLimit(s: JSONObject): Boolean {
+    if (s.s("data_volume_limit_switch") != "1") return false
+    return if (s.s("data_volume_limit_unit") != "time") {
+        val p = s.s("data_volume_limit_size").split("_")
+        val total = (p.getOrNull(0)?.toDoubleOrNull() ?: 0.0) * (p.getOrNull(1)?.toDoubleOrNull() ?: 1.0) * 1048576
+        total > 0 && (s.s("monthly_rx_bytes").toDoubleOrNull() ?: 0.0) + (s.s("monthly_tx_bytes").toDoubleOrNull() ?: 0.0) >= total
+    } else {
+        val total = (s.s("data_volume_limit_size").toDoubleOrNull() ?: 0.0) * 3600
+        total > 0 && (s.s("monthly_time").toDoubleOrNull() ?: 0.0) >= total
     }
 }
 
@@ -519,7 +550,8 @@ private fun WifiMain(st: AppState, w: JSONObject, reload: () -> Unit) {
     val passOk = mode == "OPEN" || pass.length in 8..63
     Group {
         SwitchRow("وای‌فای روشن", if (on) "دستگاه‌ها می‌توانند وصل شوند" else "خاموش است", on, icon = Icons.Filled.Wifi, tint = K.blue) {
-            if (!it) askOff = true else st.run("وای‌فای روشن شد", then = reload) { setWifiOn(true, w.s("m_ssid_enable")) }
+            if (w.s("WscModeOption") == "1") st.message = "WPS روشن است؛ صبر کن تمام شود"
+            else if (!it) askOff = true else st.run("وای‌فای روشن شد", then = reload) { setWifiOn(true, w.s("m_ssid_enable")) }
         }
     }
     if (on) {
@@ -528,7 +560,9 @@ private fun WifiMain(st: AppState, w: JSONObject, reload: () -> Unit) {
         if (mode != "OPEN") Field("رمز وای‌فای", pass, { pass = it }, password = true, ltr = true, error = !passOk, hint = "۸ تا ۶۳ حرف")
         Choice("حداکثر دستگاه هم‌زمان", (1..maxAll).map { "$it" to "$it" }, max) { max = it }
         Group { SwitchRow("مخفی کردن اسم", "در فهرست وای‌فای گوشی‌ها دیده نمی‌شود", hidden) { hidden = it } }
-        MainButton("ذخیره", enabled = ssidOk && passOk) { ask = true }
+        val wpsOn = w.s("WscModeOption") == "1"
+        if (wpsOn) Text("WPS الان روشن است؛ مودم تا تمام شدنش تنظیم وای‌فای را عوض نمی‌کند.", color = K.warn, fontSize = 13.sp)
+        MainButton("ذخیره", enabled = ssidOk && passOk && !wpsOn) { ask = true }
         GhostButton("کد QR وای‌فای", Icons.Filled.QrCode2) { qr = true }
     }
     if (ask) Ask("ذخیره شود؟", "وای‌فای چند ثانیه قطع می‌شود و همهٔ دستگاه‌ها، این گوشی هم، باید دوباره وصل شوند.", "ذخیره کن",
