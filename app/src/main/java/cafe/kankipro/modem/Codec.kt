@@ -26,6 +26,17 @@ object Codec {
         return sb.toString()
     }
 
+    /** USSD answers come as UCS-2 hex like SMS, or as plain text; anything else is shown as it is. */
+    fun ussdText(data: String, dcs: String): String {
+        val t = data.trim()
+        val isHex = t.isNotEmpty() && t.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }
+        if (isHex && t.length % 4 == 0) {
+            val u = ucs2Decode(t)
+            if (u.all { it == '\n' || it == '\r' || !it.isISOControl() }) return u
+        }
+        return t
+    }
+
     fun ucs2Encode(text: String): String = text.map { "%04X".format(it.code) }.joinToString("")
 
     // "26,11,08,04,42,10,+14" -> "2026/11/08  04:42" (the modem's own Gregorian date).
@@ -94,8 +105,17 @@ object Codec {
 
     fun duration(seconds: String?): String {
         val s = seconds?.toLongOrNull() ?: return "—"
-        val h = s / 3600
+        val d = s / 86400
+        val h = (s % 86400) / 3600
         val m = (s % 3600) / 60
-        return if (h > 0) "${h}h ${m}m" else "${m}m ${s % 60}s"
+        return when {
+            d > 0 -> "$d روز و $h ساعت"
+            h > 0 -> "$h ساعت و $m دقیقه"
+            m > 0 -> "$m دقیقه"
+            else -> "${s % 60} ثانیه"
+        }
     }
+
+    /** Keeps "12.3 MB" in one piece inside a right-to-left sentence. */
+    fun iso(s: String) = "\u2066$s\u2069"
 }

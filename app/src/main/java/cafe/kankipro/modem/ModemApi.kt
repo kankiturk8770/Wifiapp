@@ -26,7 +26,7 @@ class ModemApi(private val net: Transport) {
     /** null = not read yet. */
     @Volatile var passwordEncode: Boolean? = null
 
-    private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
+    internal fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")
 
     private fun json(body: String): JSONObject {
         val t = body.trim()
@@ -61,7 +61,7 @@ class ModemApi(private val net: Transport) {
     }
 
     /** PASSWORD_ENCODE from the modem's own js/set.js; Base64 if it cannot be read. */
-    private fun encodeFlag(): Boolean {
+    internal fun encodeFlag(): Boolean {
         passwordEncode?.let { return it }
         val v = runCatching { net.send(host, "/js/set.js", null) }.getOrNull()
         val flag = Regex("PASSWORD_ENCODE\\s*:\\s*(true|false)").find(v ?: "")?.groupValues?.get(1)
@@ -117,23 +117,37 @@ class ModemApi(private val net: Transport) {
         return w.put("password", pass)
     }
 
+    /** Wi-Fi clients, with names the owner gave them (hostNameList), like the modem's "station info" page. */
     fun devices(): List<Device> {
         val r = get("station_list", multi = false)
+        val names = runCatching { get("hostNameList", multi = false).optJSONArray("devices") }.getOrNull()
+        val given = buildMap {
+            if (names != null) for (i in 0 until names.length()) {
+                val o = names.getJSONObject(i)
+                put(o.optString("mac").lowercase(), o.optString("hostname"))
+            }
+        }
         val arr: JSONArray = r.optJSONArray("station_list") ?: JSONArray()
         return (0 until arr.length()).map {
             val o = arr.getJSONObject(it)
+            val mac = o.optString("mac_addr")
+            val own = o.optString("hostname").takeIf { n -> n != "--" } ?: ""
             Device(
-                name = o.optString("hostname").takeIf { it != "--" } ?: "",
+                name = given[mac.lowercase()]?.takeIf { n -> n.isNotEmpty() } ?: own,
                 ip = o.optString("ip_addr"),
-                mac = o.optString("mac_addr"),
+                mac = mac,
+                rx = o.optString("rx"),
+                tx = o.optString("tx"),
+                duration = o.optString("duration"),
             )
         }
     }
 
-    fun sms(): List<Sms> {
+    /** store 1 = modem memory, 0 = SIM card. tags 10 = every message. */
+    fun sms(store: Int = 1): List<Sms> {
         val r = get(
             "sms_data_total", multi = false,
-            extra = "&page=0&data_per_page=500&mem_store=1&tags=10&order_by=" + enc("order by id desc"),
+            extra = "&page=0&data_per_page=500&mem_store=$store&tags=10&order_by=" + enc("order by id desc"),
         )
         val arr = r.optJSONArray("messages") ?: JSONArray()
         return (0 until arr.length()).map {
@@ -143,8 +157,8 @@ class ModemApi(private val net: Transport) {
                 number = o.optString("number"),
                 text = Codec.ucs2Decode(o.optString("content")),
                 date = Codec.smsDate(o.optString("date")),
-                unread = o.optString("tag") == "1",
-                sent = o.optString("tag") == "2" || o.optString("tag") == "3",
+                tag = o.optString("tag"),
+                store = store,
             )
         }
     }
@@ -178,7 +192,7 @@ class ModemApi(private val net: Transport) {
     }
 
     /** SMS jobs finish later; the page asks sms_cmd_status_info until 3 (done) or 2 (failed). */
-    private fun smsDone(cmd: Int): Boolean {
+    internal fun smsDone(cmd: Int): Boolean {
         repeat(20) {
             Thread.sleep(700)
             when (get("sms_cmd_status_info", multi = false, extra = "&sms_cmd=$cmd").optString("sms_cmd_status_result")) {
@@ -247,13 +261,26 @@ class ModemApi(private val net: Transport) {
     }
 }
 
-data class Device(val name: String, val ip: String, val mac: String)
+data class Device(
+    val name: String,
+    val ip: String,
+    val mac: String,
+    val rx: String = "",
+    val tx: String = "",
+    val duration: String = "",
+)
 
+/** tag: 0 read, 1 new, 2 sent, 3 not sent, 4 draft (as the modem's SMS page reads it). */
 data class Sms(
     val id: String,
     val number: String,
     val text: String,
     val date: String,
-    val unread: Boolean,
-    val sent: Boolean,
-)
+    val tag: String,
+    val store: Int = 1,
+) {
+    val unread get() = tag == "1"
+    val sent get() = tag == "2" || tag == "3"
+    val failed get() = tag == "3"
+    val draft get() = tag == "4"
+}

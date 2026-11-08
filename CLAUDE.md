@@ -12,20 +12,29 @@
 - جواب ورود: `0`/`4` درست، `3` رمز غلط، `2` کاربر دیگر؛ `psw_fail_num_str` = تعداد فرصت باقی، `login_lock_time` ثانیهٔ قفل.
 - پیامک: `SEND_SMS` (UCS-2 هکس، `UNICODE`)، `DELETE_SMS`، `SET_MSG_READ`؛ بعد از ارسال/حذف `sms_cmd_status_info&sms_cmd=4/6` تا `3` (موفق) یا `2`.
 - وای‌فای: خواندن `WPAPSK1_encode` (Base64) یا `WPAPSK1_enaes` (AES)؛ ذخیره `SET_WIFI_SSID1_SETTINGS` (`passphrase`، `security_shared_mode`=cipher).
-- دیگر دستورها (برای قابلیت‌های بعدی): `APN_PROC_EX`، `SET_BEARER_PREFERENCE`، `SCAN_NETWORK`/`SET_NETWORK`، `GOFORM_SET_BAND`،
-  `WIFI_MAC_FILTER`، `USSD_PROCESS`، `SET_WIFI_SLEEP_INFO`، `DATA_LIMIT_SETTING`، `URL_FILTER_ADD`، `DHCP_SETTING`، `RESTORE_FACTORY_SETTINGS`.
+- بقیهٔ دستورها (APN، شبکه، فایروال، PIN، USSD، دفترچه، ساعت، …) در `Features.kt`، هر کدام با اسم ماژول صفحهٔ مودم.
+  صفحه‌هایی که `set.js` این مودم خاموش کرده (`HAS_URL`، `HAS_MULTI_SSID`، `HAS_BAND_SELECT`، `HAS_VPN`، `DDNS_SUPPORT`) عمداً نیامده‌اند؛
+  DNS، TTL و انتخاب سیم‌کارت فقط وقتی `cstm_webui_*` آن «1» است دیده می‌شوند (مثل خود مودم).
 - کدهای وب مودم که صاحب ریپو فرستاد: `main.js`، `net.js`، `set.js`، `sim_device.js`، `wifi.js`، `com.js`.
 
 ## نقشهٔ کد (`app/src/main/java/cafe/kankipro/modem/`)
 | کار | فایل |
 |---|---|
 | حرف زدن با مودم (ورود، خواندن، تغییر، پیامک، وای‌فای، گزارش عیب‌یابی) | `ModemApi.kt` |
+| همهٔ تنظیمات دیگر (هر تابع کنار اسم ماژول صفحهٔ مودم که از آن آمده) | `Features.kt` |
 | HTTP همیشه روی شبکهٔ وای‌فای (نه دیتای موبایل)، کوکی | `HttpTransport.kt` |
 | Base64/AES رمزها، متن پیامک UCS-2، قالب عدد و حجم | `Codec.kt` |
-| وضعیت برنامه، ورود خودکار، تازه کردن هر ۲ ثانیه | `AppState.kt` |
-| صفحه‌ها: ورود، خانه، وای‌فای، دستگاه‌ها، پیامک، بیشتر | `Screens.kt` |
-| رنگ‌ها و اجزای مشترک، راست‌به‌چپ | `Ui.kt` |
-| تست با مودم ساختگی | `app/src/test/.../ModemApiTest.kt` |
+| وضعیت برنامه، ورود خودکار، تازه کردن هر ۲ ثانیه، صفحه‌های باز (`open`/`back`)، `run` برای هر تغییر | `AppState.kt` |
+| تب‌ها: ورود، خانه (موج آنتن `WaveDish`)، وای‌فای، دستگاه‌ها، پیامک (دریافتی/ارسالی/سیم)، تنظیمات | `Screens.kt` |
+| زیرصفحه‌های تنظیمات (`PageHost` با اسم صفحه) | `Pages.kt` |
+| رنگ‌ها (`K`)، فونت وزیرمتن، اجزای مشترک: `SubPage`، `Load`، `Group`، `NavRow`، `SwitchRow`، `InfoRow`، `Field`، `Choice`، `Ask` | `Ui.kt` |
+| فهرست کشورها، کانال‌ها و منطقه‌های زمانی مودم (از `set.js`) | `app/src/main/assets/modem_set.json` |
+| تست درخواست‌ها با مودم ساختگی | `app/src/test/.../ModemApiTest.kt` |
+| عکس همهٔ صفحه‌ها با Paparazzi (`./gradlew recordPaparazziDebug` ← `app/src/test/snapshots/images`) | `app/src/test/.../Shots.kt` |
+
+## طراحی
+مشکی خالص (AMOLED)، یک آبی (`K.blue`) برای هر چیز قابل لمس، سبز/زرد/قرمز فقط برای وضعیت. فونت وزیرمتن. هر ردیف تنظیمات یک
+کاشی آیکن رنگی دارد. عدد و آدرس چپ‌به‌راست (`Ltr`، `Codec.iso`). بعد از هر تغییر UI عکس‌ها را دوباره بگیر و نگاه کن.
 
 ## قوانین
 1. نسخه در `app/build.gradle.kts` بالا برود (`versionCode` و `versionName`) و یک خط در «تازه‌های نسخه» `README.md`.
@@ -36,4 +45,7 @@
 
 ## کارهای باز
 - [ ] روی مودم واقعی: ورود، وضعیت، وصل/قطع، ذخیرهٔ وای‌فای، پیامک، ری‌استارت.
-- [ ] بعدی‌ها: APN، انتخاب شبکه و باند، فیلتر MAC، شبکهٔ مهمان، USSD، فیلتر سایت، حالت خواب وای‌فای.
+- [ ] فایل `js/ext/menu.js` مودم: معلوم شود کدام صفحه‌ها در منوی خود مودم هست (الان از روی پرچم‌های `set.js` است؛ فیلتر سایت،
+      شبکهٔ مهمان، باند، VPN، DDNS در این مودم خاموش‌اند و نیامده‌اند).
+- [ ] فایل `js/util.js` (اگر پیامک یا USSD فارسی خراب آمد): `encodeMessage`/`decodeMessage`.
+- [ ] واحد سرعت «محدودیت سرعت» و مقدارهای «برد وای‌فای» از صفحهٔ HTML مودم (`subpg/`) چک شود.

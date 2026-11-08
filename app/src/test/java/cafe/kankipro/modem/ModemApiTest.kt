@@ -93,3 +93,123 @@ class ModemApiTest {
         assertEquals(t, Codec.ucs2Decode(Codec.ucs2Encode(t)))
     }
 }
+
+/** Records every change sent, answers reads from a map (like the real modem's JSON). */
+private class Recorder(val values: Map<String, String> = emptyMap(), val singles: Map<String, String> = emptyMap()) : Transport {
+    val posts = mutableListOf<Map<String, String>>()
+    private fun form(s: String) = s.split("&").filter { it.contains('=') }.associate {
+        val (k, v) = it.split("=", limit = 2)
+        URLDecoder.decode(k, "UTF-8") to URLDecoder.decode(v, "UTF-8")
+    }
+    override fun send(host: String, path: String, form: String?): String {
+        if (path == "/js/set.js") return "PASSWORD_ENCODE:true"
+        if (form != null) { posts += form(form); return """{"result":"success"}""" }
+        val cmd = form(path.substringAfter('?'))["cmd"]!!
+        singles[cmd]?.let { return it }
+        return org.json.JSONObject().apply { cmd.split(",").forEach { put(it, values[it] ?: "") } }.toString()
+    }
+}
+
+class FeaturesTest {
+    @Test fun carriersParseLikeThePage() {
+        val list = parseCarriers("2,\"Turkcell\",28601,7,1;1,\"Vodafone TR\",28602,2;3,\"Avea\",28603,0,0")
+        assertEquals(3, list.size)
+        assertEquals(Carrier("Turkcell", "28601", 7, 2, 1), list[0])
+        assertEquals("3G", list[1].tech)
+        assertEquals(-1, list[1].subAct) // the page fills a missing 5th field with "NON"
+    }
+
+    @Test fun apnProfilesAreRead() {
+        val m = Recorder(mapOf(
+            "APN_configtmp0" to "Turkcell(\$)internet(\$)auto(\$)*99#(\$)NONE(\$)(\$)(\$)IP(\$)auto(\$)(\$)auto(\$)(\$)",
+            "APN_configtmp1" to "Work(\$)corp(\$)manual(\$)*99#(\$)CHAP(\$)u(\$)p(\$)IPv4v6(\$)",
+            "apn_mode" to "manual", "index" to "1",
+        ))
+        val info = ModemApi(m).apns()
+        assertEquals(2, info.profiles.size)
+        assertEquals(Apn("Work", "corp", "chap", "u", "p", "IPv4v6"), info.profiles[1])
+        assertEquals(1, info.defaultIndex)
+    }
+
+    @Test fun apnSaveSendsBothFamiliesForIpv4v6() {
+        val m = Recorder()
+        ModemApi(m).saveApn(2, Apn("Work", "corp", "chap", "u", "p", "IPv4v6"))
+        val p = m.posts.last()
+        assertEquals("APN_PROC_EX", p["goformId"]); assertEquals("save", p["apn_action"]); assertEquals("2", p["index"])
+        assertEquals("corp", p["wan_apn"]); assertEquals("corp", p["ipv6_wan_apn"]); assertEquals("*99#", p["wan_dial"])
+    }
+
+    @Test fun blockingKeepsOthersAndNames() {
+        val m = Recorder(mapOf("wifi_mac_black_list" to "AA:AA:AA:AA:AA:AA", "wifi_hostname_black_list" to "TV"))
+        ModemApi(m).blockDevice(Device("Phone", "1.1.1.1", "BB:BB:BB:BB:BB:BB"), true)
+        val p = m.posts.last()
+        assertEquals("WIFI_MAC_FILTER", p["goformId"]); assertEquals("2", p["ACL_mode"])
+        assertEquals("AA:AA:AA:AA:AA:AA;BB:BB:BB:BB:BB:BB", p["wifi_mac_black_list"])
+        assertEquals("TV;Phone", p["wifi_hostname_black_list"])
+    }
+
+    @Test fun unblockFromEmptyNameList() {
+        val m = Recorder(mapOf("wifi_mac_black_list" to "AA:AA:AA:AA:AA:AA", "wifi_hostname_black_list" to ""))
+        ModemApi(m).blockDevice(Device("", "", "aa:aa:aa:aa:aa:aa"), false)
+        assertEquals("", m.posts.last()["wifi_mac_black_list"])
+    }
+
+    @Test fun portFilterDeleteSplitsV4AndV6() {
+        val m = Recorder()
+        ModemApi(m).deletePortFilter(listOf(1, 12))
+        val p = m.posts.last()
+        assertEquals("1;", p["delete_id"]); assertEquals("2;", p["delete_id_v6"])
+    }
+
+    @Test fun portFilterActionIsOppositeOfPolicy() {
+        val m = Recorder()
+        ModemApi(m).addPortFilter(false, "", "", "10.0.0.2", "", "", "", "", "0", "TCP", "")
+        assertEquals("Drop", m.posts.last()["action"])
+        ModemApi(m).addPortFilter(false, "", "", "10.0.0.2", "", "", "", "", "1", "TCP", "")
+        assertEquals("Accept", m.posts.last()["action"])
+    }
+
+    @Test fun dataLimitFormat() {
+        val m = Recorder()
+        ModemApi(m).setDataLimit(true, true, "50_1024", "85")
+        val p = m.posts.last()
+        assertEquals("DATA_LIMIT_SETTING", p["goformId"]); assertEquals("data", p["data_volume_limit_unit"]); assertEquals("50_1024", p["data_volume_limit_size"])
+        ModemApi(m).setDataLimit(false, true, "", "")
+        assertEquals(null, m.posts.last()["data_volume_limit_unit"])
+    }
+
+    @Test fun ussdAnswerIsDecoded() {
+        val m = Recorder(singles = mapOf(
+            "ussd_write_flag" to """{"ussd_write_flag":"16"}""",
+            "ussd_data_info" to """{"ussd_data":"${Codec.ucs2Encode("شارژ: 1000")}","ussd_action":"1","ussd_dcs":"72"}""",
+        ))
+        val r = ModemApi(m).ussd("*140#", reply = false)
+        assertEquals(Ussd.Answer("شارژ: 1000", true), r)
+        assertEquals("ussd_send", m.posts.last()["USSD_operator"]); assertEquals("*140#", m.posts.last()["USSD_send_number"])
+    }
+
+    @Test fun adminPasswordIsEncodedLikeLogin() {
+        val m = Recorder()
+        ModemApi(m).changeAdminPassword("old12345", "new12345")
+        val p = m.posts.last()
+        assertEquals(Codec.b64("old12345"), p["oldPassword"]); assertEquals(Codec.b64("new12345"), p["newPassword"])
+    }
+
+    @Test fun wifiOffSendsOnlyTheSwitch() {
+        val m = Recorder()
+        ModemApi(m).setWifiOn(false, "0")
+        assertEquals(mapOf("isTest" to "false", "goformId" to "SET_WIFI_INFO", "wifiEnabled" to "0"), m.posts.last())
+    }
+
+    @Test fun sntpZoneIsSplitAtTheLastUnderscore() {
+        val m = Recorder()
+        ModemApi(m).setSntp(true, org.json.JSONObject(), "<+0330>-3:30<+0430>,J80/0,J264/0_0", "0", 2026, 11, 8, 5, 12)
+        val p = m.posts.last()
+        assertEquals("<+0330>-3:30<+0430>,J80/0,J264/0", p["timezone"]); assertEquals("0", p["sntp_timezone_index"])
+    }
+
+    @Test fun durationsArePersian() {
+        assertEquals("1 ساعت و 30 دقیقه", Codec.duration("5421"))
+        assertEquals("3 روز و 11 ساعت", Codec.duration("302000"))
+    }
+}
