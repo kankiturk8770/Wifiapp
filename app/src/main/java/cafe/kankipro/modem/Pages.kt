@@ -215,7 +215,7 @@ private fun ApnPage(st: AppState, back: () -> Unit) {
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(a.name, color = K.text, fontWeight = FontWeight.Bold)
-                                Ltr { Text("${a.apn}  ${a.pdp}", color = K.dim, fontSize = 12.sp) }
+                                Ltr { Text("${a.apn}  ${a.pdp}", color = K.dim, fontSize = 13.sp) }
                             }
                             if (i != info.defaultIndex) TextButton(enabled = off, onClick = { st.run("این پروفایل استفاده می‌شود", then = { ver++ }) { useApn("manual", i, a.pdp) } }) { Text("استفاده", color = K.ice) }
                             IconButton(enabled = off, onClick = { edit = i to a }) { Icon(Icons.Filled.Edit, "ویرایش", tint = K.ice) }
@@ -371,7 +371,7 @@ private fun WifiAdvancedPage(st: AppState, back: () -> Unit) {
             var band by remember(d) { mutableStateOf(d.s("wifi_band")) }
             var width by remember(d) { mutableStateOf(d.s("wifi_11n_cap")) }
             if (band.isNotEmpty()) Segments(listOf("2.4 GHz", "5 GHz"), if (band == "a") 1 else 0) { band = if (it == 1) "a" else "b"; mode = if (band == "a") "4" else "6"; channel = "0"; rate = "0" }
-            if (band == "a") Text("روی ۵ گیگاهرتز سرعت بیشتر ولی برد کمتر است؛ کانال را خود مودم انتخاب می‌کند.", color = K.dim, fontSize = 12.sp)
+            if (band == "a") Text("روی ۵ گیگاهرتز سرعت بیشتر ولی برد کمتر است؛ کانال را خود مودم انتخاب می‌کند.", color = K.dim, fontSize = 13.sp)
             Choice(
                 "حالت",
                 (if (band == "a") listOf("5" to "فقط 802.11 a", "2" to "فقط 802.11 n", "4" to "802.11 a/n") else listOf("6" to "802.11 b/g/n/ax"))
@@ -541,7 +541,7 @@ private fun RulesFrame(
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Ltr { Text(line1(r), color = K.text, fontWeight = FontWeight.Medium) }
-                    Text(line2(r), color = K.dim, fontSize = 12.sp)
+                    Text(line2(r), color = K.dim, fontSize = 13.sp)
                 }
                 IconButton(onClick = { onDelete(r) }) { Icon(Icons.Filled.Delete, "پاک کردن", tint = K.bad) }
             }
@@ -597,7 +597,7 @@ private fun FilterPage(st: AppState, back: () -> Unit) {
                     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Ltr { Text("${r.at(0).removeSuffix("/0").ifEmpty { "*" }}:${r.at(2)} → ${r.at(4).removeSuffix("/0").ifEmpty { "*" }}:${r.at(6)}", color = K.text) }
-                            Text(listOf(protoName(r.at(8)), if (r.at(9) == "1") "باز" else "بسته", if (r.index >= 10) "IPv6" else "IPv4", r.at(10)).filter { it.isNotBlank() }.joinToString("، "), color = K.dim, fontSize = 12.sp)
+                            Text(listOf(protoName(r.at(8)), if (r.at(9) == "1") "باز" else "بسته", if (r.index >= 10) "IPv6" else "IPv4", r.at(10)).filter { it.isNotBlank() }.joinToString("، "), color = K.dim, fontSize = 13.sp)
                         }
                         IconButton(onClick = { st.run("پاک شد", then = { ver++ }) { deletePortFilter(listOf(r.index)) } }) { Icon(Icons.Filled.Delete, "پاک کردن", tint = K.bad) }
                     }
@@ -683,7 +683,7 @@ private fun RatePage(st: AppState, back: () -> Unit) {
                     Field("سرعت دانلود", down, { v -> down = v.filter { it.isDigit() }.take(7) }, number = true, ltr = true, modifier = Modifier.weight(1f))
                     Field("سرعت آپلود", up, { v -> up = v.filter { it.isDigit() }.take(7) }, number = true, ltr = true, modifier = Modifier.weight(1f))
                 }
-                Text("به کیلوبایت (KB)، از ۱ تا ۱٬۰۰۰٬۰۰۰.", color = K.dim, fontSize = 12.sp)
+                Text("به کیلوبایت (KB)، از ۱ تا ۱٬۰۰۰٬۰۰۰.", color = K.dim, fontSize = 13.sp)
                 Field("توضیح (اختیاری)", note, { note = it.filter { c -> c != ',' && c != ';' }.take(32) })
                 MainButton("افزودن", enabled = IP.matches(ip) && (down.toIntOrNull() ?: 0) in 1..1000000 && (up.toIntOrNull() ?: 0) in 1..1000000, icon = Icons.Filled.Add) {
                     st.run("اضافه شد", then = { ver++ }) { addRateLimit(ip, down, up, note) }
@@ -836,9 +836,9 @@ private fun ContactsPage(st: AppState, back: () -> Unit) {
                         Column(Modifier.weight(1f)) {
                             Text(c.name, color = K.text, fontWeight = FontWeight.Bold)
                             Row {
-                                Ltr { Text(c.number, color = K.dim, fontSize = 12.sp) }
+                                Ltr { Text(c.number, color = K.dim, fontSize = 13.sp) }
                                 Spacer(Modifier.width(6.dp))
-                                Text(if (c.onSim) "سیم‌کارت" else GROUPS.firstOrNull { it.first == c.group }?.second ?: "مودم", color = K.dim, fontSize = 12.sp)
+                                Text(if (c.onSim) "سیم‌کارت" else GROUPS.firstOrNull { it.first == c.group }?.second ?: "مودم", color = K.dim, fontSize = 13.sp)
                             }
                         }
                         IconButton(onClick = { st.pages.clear(); st.tab = Tab.SMS; st.compose = Compose(c.number) }) { Icon(Icons.Filled.Sms, "پیامک", tint = K.pink) }
@@ -874,7 +874,7 @@ private fun ContactsPage(st: AppState, back: () -> Unit) {
                         Field("تلفن محل کار", office, { office = phone(it) }, ltr = true, number = true)
                         Field("ایمیل", email, { email = it.trim().take(40) }, ltr = true)
                         Choice("گروه", GROUPS, grp) { grp = it }
-                    } else Text("روی سیم‌کارت فقط اسم و یک شماره جا می‌شود.", color = K.dim, fontSize = 12.sp)
+                    } else Text("روی سیم‌کارت فقط اسم و یک شماره جا می‌شود.", color = K.dim, fontSize = 13.sp)
                 }
             },
             confirmButton = {
@@ -1266,7 +1266,7 @@ private fun BandTester(st: AppState, all: List<String>, chosen: List<String>, re
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (!st.bandTestRunning && st.bandResults.isEmpty()) Text(
                     "هر بار عوض کردن باند اینترنت مودم را چند ثانیه قطع می‌کند. برنامه از گوشی می‌خواهد وای‌فای مودم را نگه دارد، ولی بعضی گوشی‌ها باز هم وای‌فای بی‌اینترنت را رها می‌کنند؛ آن وقت در تنظیمات وای‌فای گوشی «سوییچ خودکار به دیتا» را خاموش کن. حدود ${lte.size} دقیقه؛ وسط بازی نزن. آخر کار باندهای قبلی خودشان برمی‌گردند.",
-                    color = K.dim, fontSize = 12.5.sp, lineHeight = 19.sp,
+                    color = K.dim, fontSize = 13.sp, lineHeight = 21.sp,
                 )
                 if (st.bandTestStep.isNotEmpty() && (st.bandTestRunning || st.bandResults.isNotEmpty())) Text(st.bandTestStep, color = if (st.bandTestRunning) K.text else K.good, fontSize = 13.sp)
                 if (st.bandTestRunning) androidx.compose.material3.LinearProgressIndicator(
@@ -1316,19 +1316,19 @@ private fun BandCard(r: BandResult, best: Boolean, rank: Int?, enabled: Boolean,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (live) Box(Modifier.clip(RoundedCornerShape(8.dp)).background(K.blue).padding(horizontal = 8.dp, vertical = 3.dp)) {
-                Text("الان", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Text("الان", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             } else Box(Modifier.clip(RoundedCornerShape(8.dp)).background(if (best) K.good.copy(alpha = .18f) else K.raised).padding(horizontal = 9.dp, vertical = 3.dp)) {
                 Text(rank?.toString() ?: "–", color = if (best) K.good else K.dim, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(bandName(r.band), color = K.text, fontWeight = FontWeight.Bold, fontSize = 14.5.sp)
+                Text(bandName(r.band), color = K.text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 val sub = when {
                     best -> "بهترین برای بازی"
                     !r.reached -> r.note
                     else -> r.note
                 }
-                if (sub.isNotEmpty()) Text(sub, color = if (best) K.good else if (!r.reached) K.bad else K.dim, fontSize = 12.sp)
+                if (sub.isNotEmpty()) Text(sub, color = if (best) K.good else if (!r.reached) K.bad else K.dim, fontSize = 13.sp)
             }
             if (r.reached && !live) SmallButton("قفل روی این", enabled = enabled, onClick = onLock)
         }
@@ -1353,11 +1353,11 @@ private fun Metric(label: String, value: String?, unit: String, color: Color, mo
         modifier.clip(RoundedCornerShape(10.dp)).background(K.raised).padding(vertical = 7.dp, horizontal = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(label, color = K.dim, fontSize = 11.sp)
+        Text(label, color = K.dim, fontSize = 13.sp)
         Ltr {
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(value ?: "—", color = if (value == null) K.dim else color, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                if (value != null) Text(" $unit", color = K.dim, fontSize = 10.sp, modifier = Modifier.padding(bottom = 2.dp))
+                if (value != null) Text(" $unit", color = K.dim, fontSize = 11.5.sp, modifier = Modifier.padding(bottom = 2.dp))
             }
         }
     }
@@ -1467,7 +1467,7 @@ private fun AtPage(st: AppState, back: () -> Unit) {
             cmd = ""
         }
         if (log.isNotEmpty()) Group {
-            Ltr { Text(log.joinToString("\n\n"), color = K.text, fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.padding(14.dp)) }
+            Ltr { Text(log.joinToString("\n\n"), color = K.text, fontFamily = FontFamily.Monospace, fontSize = 13.sp, modifier = Modifier.padding(14.dp)) }
         }
     }
 }
@@ -1526,7 +1526,7 @@ private fun ApStationPage(st: AppState, back: () -> Unit) {
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(h.ssid, color = K.text, fontWeight = FontWeight.Bold)
-                            Text((STA_AUTH.firstOrNull { it.first == h.authMode }?.second ?: h.authMode) + if (isCur) "، وصل" else "", color = K.dim, fontSize = 12.sp)
+                            Text((STA_AUTH.firstOrNull { it.first == h.authMode }?.second ?: h.authMode) + if (isCur) "، وصل" else "", color = K.dim, fontSize = 13.sp)
                         }
                         if (isCur) TextButton(onClick = { st.run("قطع شد", then = { ver++ }) { disconnectHotspot() } }) { Text("قطع", color = K.bad) }
                         else TextButton(onClick = { st.run("دستور وصل شدن رفت", then = { ver++ }) { connectHotspot(h) } }) { Text("وصل", color = K.ice) }
@@ -1619,7 +1619,7 @@ private fun ParentalPage(st: AppState, back: () -> Unit) {
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(name.ifEmpty { "دستگاه" }, color = K.text, fontWeight = FontWeight.Bold)
-                            Ltr { Text(mac.uppercase(), color = K.dim, fontSize = 12.sp, fontFamily = FontFamily.Monospace) }
+                            Ltr { Text(mac.uppercase(), color = K.dim, fontSize = 13.sp, fontFamily = FontFamily.Monospace) }
                         }
                         TextButton(onClick = { st.run("برداشته شد", then = { ver++ }) { removeChild(mac) } }) { Text("بردار", color = K.bad) }
                     }
@@ -1640,13 +1640,13 @@ private fun ParentalPage(st: AppState, back: () -> Unit) {
                     Ltr {
                         Row(Modifier.fillMaxWidth()) {
                             Spacer(Modifier.width(54.dp))
-                            listOf(0, 6, 12, 18).forEach { h -> Text("$h", color = K.dim, fontSize = 10.sp, modifier = Modifier.weight(6f)) }
+                            listOf(0, 6, 12, 18).forEach { h -> Text("$h", color = K.dim, fontSize = 11.5.sp, modifier = Modifier.weight(6f)) }
                         }
                     }
                     (0..6).forEach { day ->
                         Ltr {
                             Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(WEEK[day], color = K.text, fontSize = 11.sp, maxLines = 1,
+                                Text(WEEK[day], color = K.text, fontSize = 13.sp, maxLines = 1,
                                     modifier = Modifier.width(54.dp).clickable { grid[day] = if ((grid[day]?.size ?: 0) == 24) emptySet() else (0..23).toSet() })
                                 (0..23).forEach { h ->
                                     val on = grid[day]?.contains(h) == true
@@ -1669,7 +1669,7 @@ private fun ParentalPage(st: AppState, back: () -> Unit) {
                     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(w.name, color = K.text)
-                            Ltr { Text(w.site, color = K.dim, fontSize = 12.sp) }
+                            Ltr { Text(w.site, color = K.dim, fontSize = 13.sp) }
                         }
                         IconButton(onClick = { st.run("پاک شد", then = { ver++ }) { removeWhiteSites(listOf(w.id)) } }) { Icon(Icons.Filled.Delete, "پاک کردن", tint = K.bad) }
                     }
@@ -1777,7 +1777,7 @@ private fun SdPage(st: AppState, back: () -> Unit) {
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(f.name, color = K.text, maxLines = 1)
-                            Text(listOfNotNull(if (f.folder) null else Codec.iso(Codec.bytes(f.size)), f.time.ifEmpty { null }).joinToString("، "), color = K.dim, fontSize = 12.sp)
+                            Text(listOfNotNull(if (f.folder) null else Codec.iso(Codec.bytes(f.size)), f.time.ifEmpty { null }).joinToString("، "), color = K.dim, fontSize = 13.sp)
                         }
                         if (!f.folder) IconButton(onClick = { saving = f; save.launch(f.name) }) { Icon(Icons.Filled.Download, "گرفتن", tint = K.good) }
                         IconButton(onClick = { rename = f }) { Icon(Icons.Filled.Edit, "تغییر اسم", tint = K.ice) }

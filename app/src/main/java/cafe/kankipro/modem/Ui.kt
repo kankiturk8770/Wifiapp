@@ -84,26 +84,28 @@ import androidx.compose.ui.unit.sp
  * green / amber / red only for state (signal, battery, errors).
  */
 object K {
-    val bg = Color(0xFF000000)
-    val card = Color(0xFF0A1020)
-    val raised = Color(0xFF111A30)
-    val line = Color(0xFF18223B)
-    val text = Color(0xFFEAF0FF)
-    val dim = Color(0xFF7D8BAA)
-    val blue = Color(0xFF2F6BFF)
-    val ice = Color(0xFF9DB8FF)
-    val good = Color(0xFF2BD9A0)
-    val warn = Color(0xFFFFB547)
-    val bad = Color(0xFFFF4D6A)
-    val violet = Color(0xFF9B7BFF)
-    val cyan = Color(0xFF3CC8F0)
-    val pink = Color(0xFFFF6FB5)
+    val bg = Color(0xFF000000)      // true black (AMOLED): pixels off
+    val card = Color(0xFF15181F)    // graphite cards, clearly lifted off the black
+    val raised = Color(0xFF1F232C)
+    val line = Color(0xFF2E3440)
+    val text = Color(0xFFF4F6FA)    // near white: main text
+    val dim = Color(0xFFB4BCCB)     // second text, still easy to read (about 10:1 on cards)
+    val blue = Color(0xFF5B8CFF)
+    val ice = Color(0xFFAFC6FF)
+    val good = Color(0xFF3DDC97)
+    val warn = Color(0xFFFFC24D)
+    val bad = Color(0xFFFF6B7F)
+    val violet = Color(0xFFB39BFF)
+    val cyan = Color(0xFF5BD3F5)
+    val pink = Color(0xFFFF85C0)
 }
 
 val Vazir = FontFamily(
     Font(R.font.vazir_regular, FontWeight.Normal),
     Font(R.font.vazir_medium, FontWeight.Medium),
+    Font(R.font.vazir_semibold, FontWeight.SemiBold),
     Font(R.font.vazir_bold, FontWeight.Bold),
+    Font(R.font.vazir_extrabold, FontWeight.ExtraBold),
     Font(R.font.vazir_black, FontWeight.Black),
 )
 
@@ -167,7 +169,7 @@ fun SubPage(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (help != null) Text(help, color = K.dim, fontSize = 12.5.sp, lineHeight = 19.sp)
+            if (help != null) Text(help, color = K.dim, fontSize = 13.sp, lineHeight = 21.sp)
             content()
             Spacer(Modifier.height(24.dp))
         }
@@ -220,7 +222,7 @@ fun <T> Load(st: AppState, key: Any, load: ModemApi.() -> T, content: @Composabl
 fun Group(title: String? = null, footer: String? = null, content: @Composable ColumnScope.() -> Unit) {
     Column {
         if (title != null) Text(
-            title, color = K.dim, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+            title, color = K.dim, fontSize = 13.sp, fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
         )
         Column(
@@ -228,7 +230,7 @@ fun Group(title: String? = null, footer: String? = null, content: @Composable Co
                 .border(BorderStroke(1.dp, K.line), RoundedCornerShape(16.dp)),
         ) { content() }
         if (footer != null) Text(
-            footer, color = K.dim, fontSize = 12.sp, lineHeight = 18.sp,
+            footer, color = K.dim, fontSize = 13.sp, lineHeight = 21.sp,
             modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 6.dp),
         )
     }
@@ -254,7 +256,7 @@ fun NavRow(icon: ImageVector, tint: Color, title: String, value: String? = null,
     ) {
         IconTile(icon, if (enabled) tint else K.dim)
         Spacer(Modifier.width(12.dp))
-        Text(title, color = if (enabled) K.text else K.dim, fontSize = 14.5.sp, modifier = Modifier.weight(1f))
+        Text(title, color = if (enabled) K.text else K.dim, fontSize = 15.sp, modifier = Modifier.weight(1f))
         if (value != null) Text(value, color = if (onClick == null) K.text else K.dim, fontSize = 13.sp, fontWeight = if (onClick == null) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
         if (onClick != null) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = K.dim.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
     }
@@ -268,8 +270,8 @@ fun SwitchRow(title: String, sub: String? = null, checked: Boolean, enabled: Boo
     ) {
         if (icon != null) { IconTile(icon, tint); Spacer(Modifier.width(12.dp)) }
         Column(Modifier.weight(1f)) {
-            Text(title, color = if (enabled) K.text else K.dim, fontSize = 14.5.sp)
-            if (sub != null) Text(sub, color = K.dim, fontSize = 12.sp, lineHeight = 17.sp)
+            Text(title, color = if (enabled) K.text else K.dim, fontSize = 15.sp)
+            if (sub != null) Text(sub, color = K.dim, fontSize = 13.sp, lineHeight = 21.sp)
         }
         Spacer(Modifier.width(8.dp))
         Switch(
@@ -292,10 +294,10 @@ fun InfoRow(label: String, value: String, valueColor: Color = K.text) {
         Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = K.dim, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
+        Text(label, color = K.dim, fontSize = 14.sp, modifier = Modifier.weight(1f))
         Spacer(Modifier.width(8.dp))
         val v = value.ifEmpty { "—" }
-        val t = @Composable { Text(v, color = valueColor, fontSize = 13.5.sp, fontWeight = FontWeight.Medium) }
+        val t = @Composable { Text(v, color = valueColor, fontSize = 14.sp, fontWeight = FontWeight.Medium) }
         // Numbers and addresses read left to right; Persian words keep their own direction.
         if (v.any { it in '\u0600'..'\u06FF' }) t() else Ltr(t)
     }
@@ -306,7 +308,7 @@ fun InfoRow(label: String, value: String, valueColor: Color = K.text) {
 /** The label sits above a slim box, the same for every form in the app. */
 @Composable
 private fun FormLabel(text: String, error: Boolean = false) =
-    Text(text, color = if (error) K.bad else K.dim, fontSize = 12.5.sp, modifier = Modifier.padding(start = 4.dp, bottom = 5.dp))
+    Text(text, color = if (error) K.bad else K.dim, fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, bottom = 5.dp))
 
 @Composable
 fun Field(
@@ -335,7 +337,7 @@ fun Field(
             ) {
                 BasicTextField(
                     value = value, onValueChange = onChange, singleLine = singleLine, enabled = enabled,
-                    textStyle = TextStyle(color = if (enabled) K.text else K.dim, fontSize = 14.5.sp, fontFamily = Vazir),
+                    textStyle = TextStyle(color = if (enabled) K.text else K.dim, fontSize = 15.sp, fontFamily = Vazir),
                     cursorBrush = SolidColor(K.blue),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = when { password -> KeyboardType.Password; number -> KeyboardType.Number; ltr -> KeyboardType.Uri; else -> KeyboardType.Text },
@@ -349,7 +351,7 @@ fun Field(
             }
         }
         if (ltr) Ltr(box) else box()
-        if (hint != null) Text(hint, color = if (error) K.bad else K.dim, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(start = 4.dp, top = 4.dp))
+        if (hint != null) Text(hint, color = if (error) K.bad else K.dim, fontSize = 13.sp, lineHeight = 21.sp, modifier = Modifier.padding(start = 4.dp, top = 4.dp))
     }
 }
 
@@ -366,7 +368,7 @@ fun Choice(label: String, options: List<Pair<String, String>>, value: String, en
                 .clickable(enabled = enabled) { open = true }.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(shown, color = if (enabled) K.text else K.dim, fontSize = 14.5.sp, modifier = Modifier.weight(1f))
+            Text(shown, color = if (enabled) K.text else K.dim, fontSize = 15.sp, modifier = Modifier.weight(1f))
             Icon(Icons.Filled.UnfoldMore, null, tint = K.dim, modifier = Modifier.size(18.dp))
         }
     }
@@ -402,7 +404,7 @@ fun MainButton(text: String, enabled: Boolean = true, color: Color = K.blue, ico
         colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color.White, disabledContainerColor = K.raised, disabledContentColor = K.dim),
     ) {
         if (icon != null) { Icon(icon, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)) }
-        Text(text, fontWeight = FontWeight.Bold, fontSize = 14.5.sp, maxLines = 1)
+        Text(text, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1)
     }
 }
 
@@ -452,11 +454,11 @@ fun NeedsOffline(st: AppState) {
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.warn.copy(alpha = 0.10f)).padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("مودم این بخش را فقط وقتی اینترنت قطع است عوض می‌کند. اول از خانه اینترنت را قطع کن.", color = K.warn, fontSize = 13.sp, lineHeight = 20.sp, modifier = Modifier.weight(1f))
+        Text("مودم این بخش را فقط وقتی اینترنت قطع است عوض می‌کند. اول از خانه اینترنت را قطع کن.", color = K.warn, fontSize = 13.sp, lineHeight = 22.sp, modifier = Modifier.weight(1f))
     }
 }
 
 @Composable
 fun Empty(text: String) {
-    Group { Text(text, color = K.dim, fontSize = 13.5.sp, modifier = Modifier.padding(16.dp)) }
+    Group { Text(text, color = K.dim, fontSize = 14.sp, modifier = Modifier.padding(16.dp)) }
 }

@@ -219,7 +219,7 @@ private fun BottomBar(st: AppState) {
                         contentAlignment = Alignment.Center,
                     ) { Icon(icon, null, tint = if (on) Color.White else K.dim, modifier = Modifier.size(20.dp)) }
                     Spacer(Modifier.height(3.dp))
-                    Text(label, fontSize = 10.5.sp, maxLines = 1, color = if (on) K.text else K.dim, fontWeight = if (on) FontWeight.Medium else FontWeight.Normal)
+                    Text(label, fontSize = 11.5.sp, maxLines = 1, color = if (on) K.text else K.dim, fontWeight = if (on) FontWeight.Medium else FontWeight.Normal)
                 }
             }
         }
@@ -239,7 +239,7 @@ private fun Heading(title: String, sub: String? = null, action: (@Composable () 
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
         Column(Modifier.weight(1f)) {
             Text(title, fontSize = 22.sp, fontWeight = FontWeight.Black, color = K.text)
-            if (sub != null) Text(sub, fontSize = 12.5.sp, color = K.dim, lineHeight = 18.sp)
+            if (sub != null) Text(sub, fontSize = 13.sp, color = K.dim, lineHeight = 21.sp)
         }
         action?.invoke()
     }
@@ -473,7 +473,7 @@ private fun LimitBar(st: AppState, s: JSONObject) {
         Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(K.line)) {
             Box(Modifier.fillMaxWidth(f).height(10.dp).clip(RoundedCornerShape(5.dp)).background(color))
         }
-        if (f >= alert) Text(if (used >= total) "سقف ماهانه تمام شد." else "به ${(alert * 100).toInt()}٪ سقف رسیدی.", color = color, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+        if (f >= alert) Text(if (used >= total) "سقف ماهانه تمام شد." else "به ${(alert * 100).toInt()}٪ سقف رسیدی.", color = color, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
     }
 }
 
@@ -493,7 +493,7 @@ private fun overLimit(s: JSONObject): Boolean {
 @Composable
 fun Pill(text: String, color: Color) {
     Text(
-        text, color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+        text, color = color, fontSize = 13.sp, fontWeight = FontWeight.Bold,
         modifier = Modifier.clip(RoundedCornerShape(50)).background(color.copy(alpha = 0.14f)).padding(horizontal = 10.dp, vertical = 4.dp),
     )
 }
@@ -683,7 +683,7 @@ private fun DevicesScreen(st: AppState) {
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(names.getOrNull(i)?.takeIf { it.isNotBlank() } ?: "دستگاه", color = K.text)
-                                Ltr { Text(mac.uppercase(), color = K.dim, fontSize = 12.sp, fontFamily = FontFamily.Monospace) }
+                                Ltr { Text(mac.uppercase(), color = K.dim, fontSize = 13.sp, fontFamily = FontFamily.Monospace) }
                             }
                             TextButton(onClick = { st.run("آزاد شد", then = { ver++ }) { blockDevice(Device("", "", mac), false) } }) { Text("آزاد کن", color = K.ice) }
                         }
@@ -724,14 +724,14 @@ private fun DeviceRow(d: Device, isMe: Boolean, onEdit: () -> Unit, onBlock: () 
                 Text(d.name.ifEmpty { "دستگاه بی‌نام" }, color = K.text, fontWeight = FontWeight.Bold, maxLines = 1)
                 if (isMe) { Spacer(Modifier.width(6.dp)); Pill("همین گوشی", K.good) }
             }
-            Ltr { Text("${d.ip}   ${d.mac.uppercase()}", color = K.dim, fontSize = 12.sp, fontFamily = FontFamily.Monospace) }
+            Ltr { Text("${d.ip}   ${d.mac.uppercase()}", color = K.dim, fontSize = 13.sp, fontFamily = FontFamily.Monospace) }
             if (d.duration.isNotEmpty() && d.duration != "--" || d.rx.isNotEmpty()) {
                 Text(
                     listOfNotNull(
                         d.duration.takeIf { it.isNotEmpty() }?.let { "وصل از ${Codec.duration(it)}" },
                         if (d.rx.isNotEmpty()) "دانلود ${Codec.iso(Codec.bytes(d.rx))}" else null,
                     ).joinToString("، "),
-                    color = K.dim, fontSize = 12.sp,
+                    color = K.dim, fontSize = 13.sp,
                 )
             }
         }
@@ -825,14 +825,14 @@ fun Room(used: Int, total: Int, label: String) {
     val color = when { f >= 0.95f -> K.bad; f >= 0.8f -> K.warn; else -> K.blue }
     Column {
         Row {
-            Text(label, color = K.dim, fontSize = 12.sp, modifier = Modifier.weight(1f))
-            Text("$used از $total", color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text(label, color = K.dim, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            Text("$used از $total", color = color, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(6.dp))
         Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(K.line)) {
             Box(Modifier.fillMaxWidth(f).height(6.dp).clip(RoundedCornerShape(3.dp)).background(color))
         }
-        if (f >= 0.95f) Text("حافظه پر است؛ پیامک تازه نمی‌رسد تا چند تا را پاک کنی.", color = K.bad, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+        if (f >= 0.95f) Text("حافظه پر است؛ پیامک تازه نمی‌رسد تا چند تا را پاک کنی.", color = K.bad, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
     }
 }
 
@@ -852,7 +852,7 @@ private fun ComposeDialog(st: AppState, c: Compose, done: (Int?) -> Unit) {
                 Field("متن", text, { text = it }, singleLine = false, modifier = Modifier.heightIn(min = 110.dp))
                 // UCS-2: 70 letters in one SMS, 67 per part when it is longer.
                 val parts = Codec.smsParts(text)
-                Text("${text.length} حرف، $parts پیامک" + if (numbers.size > 1) "، برای ${numbers.size} نفر" else "", color = K.dim, fontSize = 12.sp)
+                Text("${text.length} حرف، $parts پیامک" + if (numbers.size > 1) "، برای ${numbers.size} نفر" else "", color = K.dim, fontSize = 13.sp)
             }
         },
         confirmButton = {
@@ -912,11 +912,11 @@ private fun SmsRow(m: Sms, expanded: Boolean, onClick: () -> Unit, onReply: () -
                     if (m.failed) { Spacer(Modifier.width(6.dp)); Pill("فرستاده نشد", K.bad) }
                     if (m.unread) { Spacer(Modifier.width(6.dp)); Pill("تازه", K.blue) }
                 }
-                Ltr { Text(m.date, color = K.dim, fontSize = 12.sp) }
+                Ltr { Text(m.date, color = K.dim, fontSize = 13.sp) }
             }
         }
         Spacer(Modifier.height(6.dp))
-        Text(m.text, color = if (m.unread || expanded) K.text else K.dim, lineHeight = 22.sp, maxLines = if (expanded) Int.MAX_VALUE else 2)
+        Text(m.text, color = K.text, fontSize = 15.5.sp, lineHeight = 27.sp, maxLines = if (expanded) Int.MAX_VALUE else 3)
         if (expanded) Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             if (!m.sent && m.number.any { it.isDigit() }) SmallAction(Icons.AutoMirrored.Filled.Reply, "پاسخ", K.ice, onReply)
             if (m.failed) SmallAction(Icons.Filled.Refresh, "دوباره", K.ice, onReply)
@@ -1076,7 +1076,7 @@ private fun SettingsScreen(st: AppState) {
             Divider()
             NavRow(Icons.AutoMirrored.Filled.Logout, K.dim, "خروج از حساب مودم") { st.logout() }
         }
-        Text("نسخهٔ ${BuildConfig.VERSION_NAME}", color = K.dim, fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+        Text("نسخهٔ ${BuildConfig.VERSION_NAME}", color = K.dim, fontSize = 13.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
     }
     when (ask) {
         "reboot" -> Ask("مودم ری‌استارت شود؟", "اینترنت و وای‌فای حدود یک دقیقه قطع می‌شود.", "ری‌استارت",
@@ -1092,10 +1092,10 @@ private fun SettingsScreen(st: AppState) {
             title = { Text("گزارش عیب‌یابی") },
             text = {
                 Column {
-                    Text("اگر چیزی درست کار نکرد، این متن را بفرست. رمز وای‌فای داخلش نیست.", color = K.dim, fontSize = 12.sp)
+                    Text("اگر چیزی درست کار نکرد، این متن را بفرست. رمز وای‌فای داخلش نیست.", color = K.dim, fontSize = 13.sp)
                     Spacer(Modifier.height(8.dp))
                     Ltr {
-                        Text(r, fontFamily = FontFamily.Monospace, fontSize = 10.sp, color = K.text,
+                        Text(r, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, color = K.text,
                             modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()))
                     }
                 }
