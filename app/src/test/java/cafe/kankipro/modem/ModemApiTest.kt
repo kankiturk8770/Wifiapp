@@ -213,3 +213,14 @@ class FeaturesTest {
         assertEquals("3 روز و 11 ساعت", Codec.duration("302000"))
     }
 }
+
+class SmsWatchTest {
+    private fun m(id: String, store: Int = 1) = Sms(id, "+90", "hi", "", "1", store)
+
+    @Test fun onlyNewMessagesAreNotified() {
+        val seen = setOf("1:5")
+        val fresh = SmsWatch.newOnes(listOf(m("5"), m("6"), m("5", store = 0)), seen)
+        // Same id on the SIM is a different message.
+        assertEquals(listOf("1:6", "0:5"), fresh.map { SmsWatch.key(it) })
+    }
+}

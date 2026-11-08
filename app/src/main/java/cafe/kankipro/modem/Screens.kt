@@ -657,6 +657,43 @@ private fun SmsRow(m: Sms, expanded: Boolean, onClick: () -> Unit, onDelete: () 
     }
 }
 
+// ---------------- SMS notifications ----------------
+
+@Composable
+private fun NotifyGroup(st: AppState) {
+    val ctx = LocalContext.current
+    // Re-read the two system permissions each time this screen is drawn (they change in system settings).
+    var tick by remember { mutableIntStateOf(0) }
+    val pm = runCatching { ctx.getSystemService(android.os.PowerManager::class.java) }.getOrNull()
+    val battery = remember(tick) { runCatching { pm?.isIgnoringBatteryOptimizations(ctx.packageName) == true }.getOrDefault(false) }
+    val allowed = remember(tick) { runCatching { SmsWatch.canNotify(ctx) }.getOrDefault(true) }
+    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) { tick++; onPauseOrDispose { } }
+    Group(
+        title = "اعلان پیامک",
+        footer = "هر پیامکی که به سیم‌کارت مودم برسد، در اعلان‌های گوشی می‌آید (هر ۱۵ ثانیه چک می‌شود، وقتی گوشی به وای‌فای مودم وصل است).",
+    ) {
+        SwitchRow("اعلان پیامک‌های تازه", if (st.savedPassword.isEmpty()) "رمز باید در گوشی بماند" else null, st.notifyOn,
+            icon = Icons.Filled.MarkEmailUnread, tint = K.pink) { st.setNotify(it) }
+        if (st.notifyOn && !allowed) {
+            Divider()
+            NavRow(Icons.Filled.Info, K.bad, "اجازهٔ اعلان داده نشده", "درست کن") {
+                ctx.startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName))
+            }
+        }
+        if (st.notifyOn) {
+            Divider()
+            NavRow(Icons.Filled.Bolt, if (battery) K.good else K.warn, "کار در پس‌زمینه (باتری)", if (battery) "آزاد است" else "اجازه بده") {
+                runCatching {
+                    ctx.startActivity(
+                        if (battery) Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                        else Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:${ctx.packageName}")),
+                    )
+                }
+            }
+        }
+    }
+}
+
 // ---------------- settings hub ----------------
 
 @Composable
@@ -668,6 +705,7 @@ private fun SettingsScreen(st: AppState) {
     val x = st.extra
     Page {
         Heading("تنظیمات", "همهٔ بخش‌های صفحهٔ مدیریت مودم")
+        NotifyGroup(st)
         Group(title = "اینترنت") {
             NavRow(Icons.Filled.Sync, K.blue, "حالت اتصال و رومینگ") { st.open("conn") }
             Divider()

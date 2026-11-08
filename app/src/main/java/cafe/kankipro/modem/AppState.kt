@@ -18,7 +18,7 @@ import org.json.JSONObject
 
 enum class Tab { HOME, WIFI, DEVICES, SMS, SETTINGS }
 
-class AppState(app: Application, transport: Transport?) : AndroidViewModel(app) {
+class AppState(private val app: Application, transport: Transport?) : AndroidViewModel(app) {
     constructor(app: Application) : this(app, null)
 
     private val prefs = app.getSharedPreferences("modem", Context.MODE_PRIVATE)
@@ -47,6 +47,17 @@ class AppState(app: Application, transport: Transport?) : AndroidViewModel(app) 
     var extra by mutableStateOf(JSONObject())
 
     val savedPassword: String get() = prefs.getString("pass", "") ?: ""
+
+    /** New-SMS notifications (SmsWatch). On unless the owner turns them off. */
+    var notifyOn by mutableStateOf(prefs.getBoolean(SmsWatch.KEY_ON, true))
+        private set
+
+    fun setNotify(on: Boolean) {
+        notifyOn = on
+        prefs.edit().putBoolean(SmsWatch.KEY_ON, on).apply()
+        if (on) SmsWatch.start(app) else SmsWatch.stop(app)
+        if (on && savedPassword.isEmpty()) message = "برای اعلان پیامک، بیرون برو و با تیک «رمز بماند» دوباره وارد شو"
+    }
     private var poll: Job? = null
 
     val connected: Boolean get() = status.optString("ppp_status").let { it == "ppp_connected" || it == "ppp_connecting" }
@@ -77,7 +88,8 @@ class AppState(app: Application, transport: Transport?) : AndroidViewModel(app) 
             r.onSuccess { res ->
                 when (res) {
                     is ModemApi.Login.Ok -> {
-                        prefs.edit().putString("pass", if (remember) password else "").apply()
+                        prefs.edit().putString("pass", if (remember) password else "").remove(SmsWatch.KEY_BAD).apply()
+                        SmsWatch.start(app)
                         loggedIn = true
                         message = null
                         startPolling()
@@ -95,13 +107,14 @@ class AppState(app: Application, transport: Transport?) : AndroidViewModel(app) 
 
     /** After the admin password changes, keep the saved one in step. */
     fun passwordChanged(new: String) {
-        if (savedPassword.isNotEmpty()) prefs.edit().putString("pass", new).apply()
+        if (savedPassword.isNotEmpty()) prefs.edit().putString("pass", new).remove(SmsWatch.KEY_BAD).apply()
     }
 
     fun logout() {
         poll?.cancel()
         viewModelScope.launch { io { logout() } }
         prefs.edit().putString("pass", "").apply()
+        SmsWatch.stop(app)
         loggedIn = false
         status = JSONObject()
         pages.clear()
