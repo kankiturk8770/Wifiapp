@@ -1,0 +1,40 @@
+name: build
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - name: Test and build
+        run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
+      - name: Name the APK
+        run: |
+          v=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          echo "VER=$v" >> "$GITHUB_ENV"
+          cp app/build/outputs/apk/release/app-release.apk "KankiModem-$v.apk"
+      - uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: KankiModem-${{ env.VER }}
+          path: KankiModem-*.apk
+          retention-days: 3
+      # Only main makes a release you can download on the phone (Releases page).
+      - name: Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VER }}
+          name: Kanki Modem ${{ env.VER }}
+          files: KankiModem-*.apk
