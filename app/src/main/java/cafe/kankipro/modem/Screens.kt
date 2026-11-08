@@ -64,6 +64,9 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Pin
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SdCard
+import androidx.compose.material.icons.filled.ChildCare
+import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.SettingsRemote
@@ -408,7 +411,11 @@ private fun SimCard(st: AppState, s: JSONObject) {
                 }
                 "modem_sim_undetected", "modem_undetected" -> Text("سیم‌کارت پیدا نشد. مودم را خاموش کن و سیم‌کارت را درست بگذار.", color = K.bad, lineHeight = 22.sp)
                 "modem_sim_destroy", "modem_destroy" -> Text("سیم‌کارت خراب یا برای همیشه قفل است (PUK تمام شد). باید از اپراتور سیم‌کارت تازه بگیری.", color = K.bad, lineHeight = 22.sp)
-                "modem_imsi_waitnck" -> Text("سیم‌کارت با این مودم قفل شبکه دارد.", color = K.bad)
+                "modem_imsi_waitnck" -> {
+                    Text("مودم این سیم‌کارت را قفل کرده (قفل شبکه). کد باز کردن را از فروشنده بگیر.", color = K.bad, lineHeight = 22.sp)
+                    Field("کد باز کردن", code, { code = it.trim().take(32) }, ltr = true)
+                    MainButton("باز کن", enabled = code.isNotEmpty(), icon = Icons.Filled.Lock) { st.run("قفل باز شد", "کد اشتباه است") { unlockNetwork(code) }; code = "" }
+                }
                 else -> Text("سیم‌کارت در حال آماده شدن است…", color = K.dim)
             }
         }
@@ -526,6 +533,8 @@ private fun WifiScreen(st: AppState) {
         Group(title = "بیشتر") {
             NavRow(Icons.Filled.Groups, K.violet, "شبکهٔ مهمان") { st.open("guest") }
             Divider()
+            NavRow(Icons.Filled.WifiTethering, K.good, "اینترنت از وای‌فای دیگر") { st.open("apstation") }
+            Divider()
             NavRow(Icons.Filled.Speed, K.cyan, "پیشرفته (فرکانس، کانال، کشور، سرعت)") { st.open("wifiadv") }
             Divider()
             NavRow(Icons.Filled.Bedtime, K.violet, "خواب و برد وای‌فای") { st.open("sleep") }
@@ -545,7 +554,7 @@ private fun WifiMain(st: AppState, w: JSONObject, reload: () -> Unit) {
     var pass by remember(w) { mutableStateOf(w.s("password")) }
     var mode by remember(w) { mutableStateOf(w.s("AuthMode").ifEmpty { "WPA2PSK" }) }
     var hidden by remember(w) { mutableStateOf(w.s("HideSSID") == "1") }
-    val maxAll = w.s("MAX_Station_num").toIntOrNull()?.coerceIn(1, 32) ?: 32
+    val maxAll = w.s("MAX_Station_num").toIntOrNull()?.coerceIn(1, 32) ?: 8
     var max by remember(w) { mutableStateOf(w.s("MAX_Access_num").ifEmpty { "10" }) }
     var ask by remember { mutableStateOf(false) }
     var qr by remember { mutableStateOf(false) }
@@ -949,6 +958,13 @@ private fun SettingsScreen(st: AppState) {
     Page {
         Heading("تنظیمات", "همهٔ بخش‌های صفحهٔ مدیریت مودم")
         NotifyGroup(st)
+        Group {
+            NavRow(Icons.Filled.Bolt, K.blue, "راه‌اندازی سریع") { st.open("quick") }
+            Divider()
+            NavRow(Icons.Filled.ChildCare, K.warn, "کنترل والدین") { st.open("parental") }
+            Divider()
+            NavRow(Icons.Filled.SdCard, K.cyan, "کارت حافظه و فایل‌ها") { st.open("sd") }
+        }
         Group(title = "اینترنت") {
             NavRow(Icons.Filled.Sync, K.blue, "حالت اتصال و رومینگ") { st.open("conn") }
             Divider()

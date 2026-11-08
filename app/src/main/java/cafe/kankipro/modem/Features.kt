@@ -8,7 +8,7 @@ import org.json.JSONObject
 
 private fun JSONObject.s(k: String): String = optString(k)
 
-private fun ok(r: JSONObject): Boolean = r.optString("result").let { it == "success" || it == "0" }
+internal fun ok(r: JSONObject): Boolean = r.optString("result").let { it == "success" || it == "0" }
 
 /** Values the modem uses for "can this page be shown" (service.getExtraFunc). "1" = shown, "2" = root only. */
 fun ModemApi.extraFunc(): JSONObject = get(
@@ -701,3 +701,249 @@ fun ModemApi.atCommand(cmd: String): String {
 
 fun ModemApi.usbMac(): String = get("usb_net_mac_addr").s("usb_net_mac_addr")
 fun ModemApi.setUsbMac(mac: String) = setOk("SET_USB_MAC_ADDRESS", listOf("mac" to mac))
+
+// ---------------- AP Station (wifi_ap_station): the modem takes internet from another Wi-Fi ----------------
+
+/** One saved Wi-Fi the modem can join. Fields in the order the modem stores them (service cY). */
+data class Hotspot(
+    val profileName: String,
+    val fromProvider: String = "0",
+    val connectStatus: String = "0",
+    val signal: String = "",
+    val ssid: String,
+    val authMode: String,
+    val encryptType: String,
+    val password: String,
+    val keyID: String = "0",
+    val mac: String = "0F:00:00:00:00:00",
+) {
+    fun stored() = listOf(profileName, fromProvider.ifEmpty { "0" }, connectStatus.ifEmpty { "0" }, signal, ssid, authMode, encryptType, password.ifEmpty { "0" }, keyID, mac).joinToString(",")
+}
+
+/** A Wi-Fi found by a scan. */
+data class FoundWifi(val ssid: String, val signal: String, val channel: String, val authMode: String, val encryptType: String, val mac: String)
+
+fun ModemApi.apStation(): JSONObject = get("wifi_sta_connection,pswan_priority,wifiwan_priority,ethwan_priority,sta_ip_status,EX_SSID1,EX_wifi_profile,m_ssid_enable")
+
+fun ModemApi.setApStation(on: Boolean) = setOk("WIFI_STA_CONTROL", listOf("wifi_sta_connection" to if (on) "1" else "0"))
+
+fun ModemApi.hotspots(): List<Hotspot> {
+    val d = get("wifi_profile_num,wifi_profile," + (1 until 10).joinToString(",") { "wifi_profile$it" })
+    val out = mutableListOf<Hotspot>()
+    for (i in 0 until 10) {
+        val raw = d.s(if (i == 0) "wifi_profile" else "wifi_profile$i")
+        for (one in raw.split(";")) {
+            val f = one.split(",")
+            if (f.isEmpty() || f[0].isEmpty()) break
+            fun at(k: Int) = f.getOrElse(k) { "" }
+            out += Hotspot(at(0), at(1), at(2), at(3), at(4), at(5), at(6), if (at(7) == "0") "" else at(7), at(8), at(9))
+        }
+    }
+    return out
+}
+
+/** service al / c5: the whole list is written back, spread over wifi_profile..wifi_profile9 by index % 10. */
+private fun ModemApi.writeHotspots(list: List<Hotspot>, changed: Hotspot?, action: String): Boolean {
+    val slots = Array(10) { mutableListOf<String>() }
+    list.forEachIndexed { i, h -> slots[i % 10] += h.stored() }
+    val p = mutableListOf(
+        "wifi_profile_num" to list.size.toString(),
+        "wifi_update_profile" to (changed?.stored() ?: ""),
+        "action" to action,
+        "wifi_profile" to slots[0].joinToString(";"),
+    )
+    for (i in 1 until 10) p += "wifi_profile$i" to slots[i].joinToString(";")
+    return setOk("WIFI_SPOT_PROFILE_UPDATE", p)
+}
+
+/** Add (profileName empty) or change a saved Wi-Fi. */
+fun ModemApi.saveHotspot(h: Hotspot, list: List<Hotspot>): Boolean {
+    return if (h.profileName.isEmpty()) {
+        val n = h.copy(profileName = (System.currentTimeMillis().toString() + (100..999).random()).takeLast(16))
+        writeHotspots(list + n, n, "add")
+    } else writeHotspots(list.map { if (it.profileName == h.profileName) h else it }, h, "modify")
+}
+
+fun ModemApi.deleteHotspot(h: Hotspot, list: List<Hotspot>) = writeHotspots(list.filter { it.profileName != h.profileName }, h, "delete")
+
+fun ModemApi.connectHotspot(h: Hotspot): Boolean {
+    val r = set(
+        "WLAN_SET_STA_CON",
+        listOf(
+            "EX_SSID1" to h.ssid, "EX_AuthMode" to h.authMode, "EX_EncrypType" to h.encryptType, "EX_DefaultKeyID" to h.keyID,
+            "EX_WEPKEY" to h.password, "EX_WPAPSK1" to h.password, "EX_wifi_profile" to h.profileName, "EX_mac" to h.mac,
+        ),
+    ).s("result")
+    return r == "success" || r == "processing"
+}
+
+fun ModemApi.disconnectHotspot() = setOk("WLAN_SET_STA_DISCON")
+
+/** WLAN_SET_STA_REFRESH, then scan_finish: 0 still scanning, 2 failed, else EX_APLIST / EX_APLIST1. */
+fun ModemApi.scanWifi(): List<FoundWifi>? {
+    if (!ok(set("WLAN_SET_STA_REFRESH"))) return null
+    repeat(40) {
+        Thread.sleep(1500)
+        val d = get("scan_finish,EX_APLIST,EX_APLIST1")
+        when (d.s("scan_finish")) {
+            "0" -> {}
+            "2" -> return null
+            else -> return (d.s("EX_APLIST").split(";") + d.s("EX_APLIST1").split(";")).mapNotNull { one ->
+                val f = one.split(",")
+                if (f.size < 8 || f[0].isEmpty()) null else FoundWifi(f[2], f[3], f[4], f[5], f[6], f[7])
+            }.distinctBy { it.ssid + it.mac }
+        }
+    }
+    return null
+}
+
+// ---------------- parental control (firewall_parental_control) ----------------
+
+fun ModemApi.childDevices(): List<Pair<String, String>> {
+    val d = get("childGroupList", multi = false)
+    val arr = d.optJSONArray("devices") ?: d.optJSONArray("childGroupList") ?: JSONArray()
+    return (0 until arr.length()).map { arr.getJSONObject(it).let { o -> o.s("mac") to o.s("hostname") } }
+}
+fun ModemApi.addChild(mac: String) = setOk("ADD_DEVICE", listOf("mac" to mac))
+fun ModemApi.removeChild(mac: String) = setOk("DEL_DEVICE", listOf("mac" to mac))
+
+/** time_limited: "day+h,h;day+h" with day 0..6 and hours 0..23. */
+fun ModemApi.timeLimits(): Map<Int, Set<Int>> = parseTimeLimits(get("time_limited", multi = false).s("time_limited"))
+
+fun parseTimeLimits(raw: String): Map<Int, Set<Int>> = raw.split(";").mapNotNull { part ->
+    val (d, h) = part.split("+").let { if (it.size == 2) it[0] to it[1] else return@mapNotNull null }
+    val day = d.toIntOrNull() ?: return@mapNotNull null
+    day to h.split(",").mapNotNull { it.toIntOrNull() }.toSet()
+}.toMap()
+
+fun timeLimitText(m: Map<Int, Set<Int>>): String =
+    (0..6).filter { !m[it].isNullOrEmpty() }.joinToString(";") { d -> "$d+" + m[d]!!.sorted().joinToString(",") }
+
+fun ModemApi.saveTimeLimits(m: Map<Int, Set<Int>>) = setOk("SAVE_TIME_LIMITED", listOf("time_limited" to timeLimitText(m)))
+
+data class WhiteSite(val id: String, val name: String, val site: String)
+
+fun ModemApi.whiteSites(): List<WhiteSite> {
+    val d = get("site_white_list", multi = false)
+    val arr = d.optJSONArray("siteList") ?: d.optJSONArray("site_white_list") ?: JSONArray()
+    return (0 until arr.length()).map { arr.getJSONObject(it).let { o -> WhiteSite(o.s("id"), o.s("name"), o.s("site")) } }
+}
+fun ModemApi.addWhiteSite(name: String, site: String) = setOk("ADD_WHITE_SITE", listOf("name" to name, "site" to site))
+fun ModemApi.removeWhiteSites(ids: List<String>) = setOk("REMOVE_WHITE_SITE", listOf("ids" to ids.joinToString(",")))
+
+// ---------------- memory card (sd, sd_httpshare) ----------------
+
+const val SD_BASE = "/mmc2"
+
+fun ModemApi.sdConfig(): JSONObject = get("sdcard_mode_option,sd_card_state,HTTP_SHARE_STATUS,HTTP_SHARE_WR_AUTH,HTTP_SHARE_FILE")
+
+/** sd_mode as the page reads it: "0" = file sharing in the browser, "1" = USB storage. */
+fun ModemApi.setSdMode(httpShare: Boolean): Boolean {
+    val r = set("HTTPSHARE_MODE_SET", listOf("mode_set" to if (httpShare) "http_share_mode" else "usb_mode")).s("result")
+    return r == "success" || r == "processing"
+}
+
+fun ModemApi.setSdSharing(on: Boolean, readWrite: Boolean, folder: String) = setOk(
+    "HTTPSHARE_AUTH_SET",
+    listOf(
+        "HTTP_SHARE_STATUS" to if (on) "Enabled" else "Disabled",
+        "HTTP_SHARE_WR_AUTH" to if (readWrite) "readWrite" else "readOnly",
+        "HTTP_SHARE_FILE" to folder,
+    ),
+)
+
+data class SdFile(val name: String, val folder: Boolean, val size: String, val time: String)
+
+/** HTTPSHARE_ENTERFOLD: one page of a folder; path is like /mmc2/Music. */
+fun ModemApi.sdList(path: String, page: Int): Pair<Int, List<SdFile>>? {
+    val r = set("HTTPSHARE_ENTERFOLD", listOf("path_SD_CARD" to path, "indexPage" to page.toString()))
+    val res = r.opt("result")
+    if (res !is JSONObject) return null
+    val arr = res.optJSONArray("fileInfo") ?: JSONArray()
+    val files = (0 until arr.length()).mapNotNull {
+        val o = arr.getJSONObject(it)
+        if (o.s("fileName").isEmpty()) null else SdFile(o.s("fileName"), o.s("attribute") == "document", o.s("size"), o.s("lastUpdateTime"))
+    }
+    return (res.s("totalRecord").toIntOrNull() ?: files.size) to files
+}
+
+/** Total and free bytes (the modem counts in 32 KB blocks). */
+fun ModemApi.sdSpace(): Pair<Long, Long>? {
+    val d = get("HTTPSHARE_GETCARD_VALUE", multi = false)
+    if (d.s("result") == "no_sdcard") return null
+    return (d.s("sd_card_total_size").toLongOrNull() ?: 0) * 32 * 1024 to (d.s("sd_card_avi_space").toLongOrNull() ?: 0) * 32 * 1024
+}
+
+private fun sdTime(): Pair<String, String> {
+    val now = System.currentTimeMillis()
+    val off = java.util.TimeZone.getDefault().getOffset(now) / 1000
+    val f = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date(now))
+    return f to ((now + off * 1000L) / 1000).toString()
+}
+
+fun ModemApi.sdNewFolder(path: String): Boolean {
+    val (t, u) = sdTime()
+    return set("HTTPSHARE_NEW", listOf("path_SD_CARD" to path, "path_SD_CARD_time" to t, "path_SD_CARD_time_unix" to u)).s("result") == "success"
+}
+
+fun ModemApi.sdRename(folder: String, old: String, new: String): Boolean {
+    val (t, u) = sdTime()
+    return set(
+        "HTTPSHARE_FILE_RENAME",
+        listOf("path_SD_CARD" to folder, "OLD_NAME_SD_CARD" to "$folder/$old", "NEW_NAME_SD_CARD" to "$folder/$new", "path_SD_CARD_time" to t, "path_SD_CARD_time_unix" to u),
+    ).s("result") == "success"
+}
+
+fun ModemApi.sdDelete(folder: String, names: List<String>): Boolean {
+    val (t, u) = sdTime()
+    return set(
+        "HTTPSHARE_DEL",
+        listOf("path_SD_CARD" to folder, "name_SD_CARD" to names.joinToString("*") + "*", "path_SD_CARD_time" to t, "path_SD_CARD_time_unix" to u),
+    ).s("result") == "success"
+}
+
+// ---------------- network unlock (locknet) ----------------
+
+fun ModemApi.networkUnlockTries(): String = get("unlock_nck_time", multi = false).s("unlock_nck_time")
+fun ModemApi.unlockNetwork(code: String) = setOk("UNLOCK_NETWORK", listOf("notCallback" to "true", "unlock_network_code" to code))
+
+// ---------------- quick setup (adm_quick_set) ----------------
+
+fun ModemApi.quickInfo(): JSONObject {
+    val apns = (0..19).joinToString(",") { "APN_configtmp$it" }
+    return get("pdp_type,ipv6_pdp_type,wifi_cur_state,SSID1,HideSSID,AuthMode,WscModeOption,ppp_status,apn_index,ipv6_apn_index,m_profile_name,apn_mode,EncrypType,WPAPSK1_encode,$apns")
+}
+
+/** QUICK_SETUP_EX: APN and Wi-Fi in one step, like the modem's wizard. */
+fun ModemApi.quickSetup(apnIndex: String, apnMode: String, a: Apn, ssid: String, hidden: Boolean, auth: String, pass: String): Boolean {
+    val r = set(
+        "QUICK_SETUP_EX",
+        listOf(
+            "index" to apnIndex, "pdp_type" to a.pdp, "apn_mode" to apnMode, "profile_name" to a.name, "wan_apn" to a.apn,
+            "ppp_auth_mode" to a.auth, "ppp_username" to a.user, "ppp_passtmp" to a.pass,
+            "ipv6_wan_apn" to a.apn, "ipv6_ppp_auth_mode" to a.auth, "ipv6_ppp_username" to a.user, "ipv6_ppp_passtmp" to a.pass,
+            "SSID_name" to ssid, "SSID_Broadcast" to if (hidden) "1" else "0", "Encryption_Mode_hid" to auth,
+            "security_shared_mode" to "NONE", "WPA_PreShared_Key" to if (auth == "OPEN") "" else secret(pass),
+            "wep_default_key" to "0", "WPA_ENCRYPTION_hid" to when (auth) { "OPEN" -> "NONE"; "WPA2PSK" -> "1"; else -> "2" },
+        ),
+    ).s("result")
+    return r == "success" || r.isEmpty()
+}
+
+/** ota_update "update from a file": the modem page posts it to cgi-bin/upload/upload.cgi as "filename". */
+fun ModemApi.uploadFirmware(name: String, bytes: ByteArray): String {
+    val up = net as? Uploader ?: return "failure"
+    val body = up.upload(host, "/cgi-bin/upload/upload.cgi", "filename", name, bytes).lowercase()
+    return Regex("success|failure\\d?").find(body)?.value ?: "failure"
+}
+
+/** sd_httpshare upload: /cgi-bin/httpshare/<name>, multipart. */
+fun ModemApi.sdUpload(folder: String, name: String, bytes: ByteArray): Boolean {
+    val up = net as? Uploader ?: return false
+    val (t, u) = sdTime()
+    val body = up.upload(
+        host, "/cgi-bin/httpshare/" + java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20"), "filename", name, bytes,
+        mapOf("path_SD_CARD" to folder, "path_SD_CARD_time" to t, "path_SD_CARD_time_unix" to u),
+    )
+    return !body.lowercase().contains("fail")
+}

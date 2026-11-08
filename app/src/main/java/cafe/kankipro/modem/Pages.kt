@@ -1,6 +1,21 @@
 package cafe.kankipro.modem
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.material.icons.filled.Sms
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -96,6 +111,10 @@ fun PageHost(st: AppState, name: String) {
         "tr069" -> Tr069Page(st, back)
         "at" -> AtPage(st, back)
         "usbmac" -> UsbMacPage(st, back)
+        "apstation" -> ApStationPage(st, back)
+        "parental" -> ParentalPage(st, back)
+        "sd" -> SdPage(st, back)
+        "quick" -> QuickSetupPage(st, back)
         "simlock" -> SimLockPage(st, back)
         else -> SubPage("—", back) { Empty("این صفحه پیدا نشد.") }
     }
@@ -336,7 +355,7 @@ private fun WifiAdvancedPage(st: AppState, back: () -> Unit) {
     var ask by remember { mutableStateOf(false) }
     SubPage("وای‌فای پیشرفته", back, "اگر وای‌فای اطراف شلوغ است، یک کانال خلوت‌تر انتخاب کن.") {
         Load(st, 0, { wifiAdvance() }) { d, reload ->
-            var mode by remember(d) { mutableStateOf(d.s("WirelessMode").ifEmpty { "4" }) }
+            var mode by remember(d) { mutableStateOf(d.s("WirelessMode").ifEmpty { "6" }) }
             var country by remember(d) { mutableStateOf(d.s("CountryCode")) }
             var channel by remember(d) { mutableStateOf(d.s("Channel").ifEmpty { "0" }) }
             var rate by remember(d) { mutableStateOf(d.s("HT_MCS").ifEmpty { "0" }) }
@@ -346,11 +365,12 @@ private fun WifiAdvancedPage(st: AppState, back: () -> Unit) {
             val rs = rates(mode)
             var band by remember(d) { mutableStateOf(d.s("wifi_band")) }
             var width by remember(d) { mutableStateOf(d.s("wifi_11n_cap")) }
-            if (band.isNotEmpty()) Segments(listOf("2.4 GHz", "5 GHz"), if (band == "a") 1 else 0) { band = if (it == 1) "a" else "b"; mode = "4"; channel = "0"; rate = "0" }
+            if (band.isNotEmpty()) Segments(listOf("2.4 GHz", "5 GHz"), if (band == "a") 1 else 0) { band = if (it == 1) "a" else "b"; mode = if (band == "a") "4" else "6"; channel = "0"; rate = "0" }
             if (band == "a") Text("روی ۵ گیگاهرتز سرعت بیشتر ولی برد کمتر است؛ کانال را خود مودم انتخاب می‌کند.", color = K.dim, fontSize = 12.sp)
             Choice(
                 "حالت",
-                if (band == "a") listOf("5" to "فقط 802.11 a", "2" to "فقط 802.11 n", "4" to "802.11 a/n") else listOf("4" to "802.11 b/g/n", "2" to "فقط 802.11 n"),
+                (if (band == "a") listOf("5" to "فقط 802.11 a", "2" to "فقط 802.11 n", "4" to "802.11 a/n") else listOf("6" to "802.11 b/g/n/ax"))
+                    .let { l -> if (l.none { it.first == mode }) l + (mode to "حالت $mode") else l },
                 mode,
             ) { mode = it; rate = "0" }
             Choice("کشور", cList, country) { country = it; channel = "0" }
@@ -384,13 +404,10 @@ private fun SleepPage(st: AppState, back: () -> Unit) = SubPage(
             sleep,
         ) { sleep = it }
         MainButton("ذخیره خواب") { st.run("ذخیره شد", then = reload) { setSleep(sleep) } }
-        // Range: only the three values ZTE pages use; anything else is left alone.
-        val ranges = listOf("short_mode" to "کم (کم‌مصرف)", "medium_mode" to "متوسط", "long_mode" to "زیاد (دورتر)")
-        if (ranges.any { it.first == d.s("wifi_coverage") }) {
-            var range by remember(d) { mutableStateOf(d.s("wifi_coverage")) }
-            Choice("برد وای‌فای", ranges, range) { range = it }
-            MainButton("ذخیره برد") { st.run("ذخیره شد", then = reload) { setRange(range) } }
-        }
+        // Values from the modem's own page (subpg/wifi_sleep_mode.html).
+        var range by remember(d) { mutableStateOf(d.s("wifi_coverage").ifEmpty { "long_mode" }) }
+        Choice("برد وای‌فای", listOf("short_mode" to "کم (کم‌مصرف‌ترین)", "medium_mode" to "متوسط", "long_mode" to "زیاد (دورترین)"), range) { range = it }
+        MainButton("ذخیره برد") { st.run("ذخیره شد", then = reload) { setRange(range) } }
     }
 }
 
@@ -654,16 +671,16 @@ private fun RatePage(st: AppState, back: () -> Unit) {
             var up by remember { mutableStateOf("") }
             var note by remember { mutableStateOf("") }
             RulesFrame(st, on == "1", { v -> st.run("ذخیره شد", then = { ver++ }) { setRateLimitOn(v) } }, rules,
-                { it.at(0) }, { listOf("دانلود ${it.at(1)}", "آپلود ${it.at(2)}", it.at(3)).filter { s -> s.isNotBlank() }.joinToString("، ") },
+                { it.at(0) }, { listOf("دانلود ${it.at(1)} KB", "آپلود ${it.at(2)} KB", it.at(3)).filter { s -> s.isNotBlank() }.joinToString("، ") },
                 { r -> st.run("پاک شد", then = { ver++ }) { deleteRateLimit(listOf(r.index)) } }) {
                 Field("IP دستگاه", ip, { ip = it.trim() }, ltr = true, error = ip.isNotEmpty() && !IP.matches(ip), hint = "IP هر دستگاه در صفحهٔ «دستگاه‌ها» هست")
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Field("سرعت دانلود", down, { v -> down = v.filter { it.isDigit() }.take(7) }, number = true, ltr = true, modifier = Modifier.weight(1f))
                     Field("سرعت آپلود", up, { v -> up = v.filter { it.isDigit() }.take(7) }, number = true, ltr = true, modifier = Modifier.weight(1f))
                 }
-                Text("واحد سرعت همان واحد صفحهٔ خود مودم است.", color = K.dim, fontSize = 12.sp)
+                Text("به کیلوبایت (KB)، از ۱ تا ۱٬۰۰۰٬۰۰۰.", color = K.dim, fontSize = 12.sp)
                 Field("توضیح (اختیاری)", note, { note = it.filter { c -> c != ',' && c != ';' }.take(32) })
-                MainButton("افزودن", enabled = IP.matches(ip) && down.isNotEmpty() && up.isNotEmpty(), icon = Icons.Filled.Add) {
+                MainButton("افزودن", enabled = IP.matches(ip) && (down.toIntOrNull() ?: 0) in 1..1000000 && (up.toIntOrNull() ?: 0) in 1..1000000, icon = Icons.Filled.Add) {
                     st.run("اضافه شد", then = { ver++ }) { addRateLimit(ip, down, up, note) }
                 }
             }
@@ -1010,16 +1027,42 @@ private fun UpdatePage(st: AppState, back: () -> Unit) {
     var checking by remember { mutableStateOf(false) }
     var ask by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
+    var binMsg by remember { mutableStateOf<String?>(null) }
+    var bin by remember { mutableStateOf<Pair<String, ByteArray>?>(null) }
+    val pickBin = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val name = uri.lastPathSegment?.substringAfterLast('/')?.substringAfterLast(':') ?: "update.bin"
+        val bytes = runCatching { ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+        binMsg = when {
+            !name.lowercase().endsWith(".bin") -> "فقط فایل .bin قبول است"
+            bytes == null -> "فایل خوانده نشد"
+            bytes.size > 64 * 1024 * 1024 -> "فایل بزرگ‌تر از ۶۴ مگابایت است"
+            else -> { bin = name to bytes; null }
+        }
+    }
+    bin?.let { (name, bytes) ->
+        Ask("«$name» نصب شود؟", "مودم با این فایل به‌روز و ری‌استارت می‌شود. تا تمام شدن خاموشش نکن.", "نصب کن", danger = true,
+            onYes = {
+                scope.launch {
+                    st.busy = true
+                    val r = st.io { uploadFirmware(name, bytes) }.getOrElse { "failure" }
+                    st.busy = false
+                    binMsg = if (r == "success") "✓ فایل فرستاده شد؛ مودم خودش به‌روز و ری‌استارت می‌شود" else "نصب نشد (${r})"
+                }
+            },
+            onNo = { bin = null })
+    }
     SubPage("به‌روزرسانی مودم", back, "نرم‌افزار تازهٔ خود مودم را از سازنده می‌گیرد (اینترنت مودم باید وصل باشد).") {
         Load(st, 0, { deviceInfo() to otaSettings() }) { (d, o), reload ->
             Group {
                 InfoRow("نسخهٔ فعلی", d.s("cstm_sw_version").ifEmpty { d.s("cr_version") })
                 if (o.s("dm_last_check_time").isNotEmpty()) { Divider(); InfoRow("آخرین بررسی", o.s("dm_last_check_time")) }
             }
-            // Only the two values ZTE pages use (0 = check by hand, 1 = check by itself); anything else is left alone.
-            if (o.s("fota_updateMode") == "0" || o.s("fota_updateMode") == "1") {
+            // subpg/ota_update.html: updateMode 1 = on, 0 = off; the interval list is hidden there.
+            run {
                 var auto by remember(o) { mutableStateOf(o.s("fota_updateMode") == "1") }
-                var days by remember(o) { mutableStateOf(o.s("fota_updateIntervalDay").ifEmpty { "7" }) }
+                val days = o.s("fota_updateIntervalDay").ifEmpty { "1" }
                 var roam by remember(o) { mutableStateOf(o.s("fota_allowRoamingUpdate") == "1") }
                 Group(title = "بررسی خودکار") {
                     SwitchRow("مودم خودش نسخهٔ تازه را بررسی کند", null, auto) { auto = it }
@@ -1028,7 +1071,6 @@ private fun UpdatePage(st: AppState, back: () -> Unit) {
                         SwitchRow("در رومینگ هم بررسی شود", "در رومینگ اینترنت گران‌تر است", roam) { roam = it }
                     }
                 }
-                if (auto) Choice("هر چند روز", listOf("1", "7", "15", "30").map { it to "$it روز" }.let { l -> if (l.none { it.first == days }) l + (days to "$days روز") else l }, days) { days = it }
                 GhostButton("ذخیرهٔ بررسی خودکار") { st.run("ذخیره شد", then = reload) { setOtaSettings(if (auto) "1" else "0", days, roam) } }
             }
         }
@@ -1052,6 +1094,10 @@ private fun UpdatePage(st: AppState, back: () -> Unit) {
         }
         if (!st.connected) Text("اول اینترنت مودم را وصل کن.", color = K.warn, fontSize = 13.sp)
         if (has) GhostButton("دانلود و نصب", color = K.good) { ask = true }
+        Group(title = "آپدیت با فایل", footer = "فقط فایل .bin مخصوص همین مودم، حداکثر ۶۴ مگابایت. فایل اشتباه می‌تواند مودم را خراب کند. در حین آپدیت مودم را خاموش نکن.") {
+            NavRow(Icons.Filled.Upload, K.warn, "انتخاب فایل و نصب") { pickBin.launch(arrayOf("*/*")) }
+        }
+        binMsg?.let { Text(it, color = if (it.startsWith("✓")) K.good else K.bad, fontSize = 13.sp) }
         if (ask) Ask("نصب شود؟", "مودم نسخهٔ تازه را دانلود و نصب می‌کند و خودش ری‌استارت می‌شود. باتری باید شارژ داشته باشد و مودم را خاموش نکن.", "نصب کن",
             onYes = { st.run("دانلود شروع شد؛ مودم خودش ری‌استارت می‌شود") { acceptUpdate() } }, onNo = { ask = false })
     }
@@ -1129,7 +1175,7 @@ private fun GuestPage(st: AppState, back: () -> Unit) {
                 var mode by remember(w) { mutableStateOf(w.s("m_AuthMode").ifEmpty { "WPA2PSK" }) }
                 var hidden by remember(w) { mutableStateOf(w.s("m_HideSSID") == "1") }
                 var isolate by remember(w) { mutableStateOf(w.s("m_NoForwarding") == "1") }
-                val maxAll = w.s("MAX_Station_num").toIntOrNull()?.coerceIn(1, 32) ?: 32
+                val maxAll = w.s("MAX_Station_num").toIntOrNull()?.coerceIn(1, 32) ?: 8
                 var max by remember(w) { mutableStateOf(w.s("m_MAX_Access_num").ifEmpty { "5" }) }
                 val ssidOk = ssid.toByteArray().size in 1..32
                 val passOk = mode == "OPEN" || pass.length in 8..63
@@ -1285,6 +1331,367 @@ private fun UsbMacPage(st: AppState, back: () -> Unit) = SubPage("MAC کارت U
             error = !Regex("^[0-9A-F]{12}$").matches(mac))
         MainButton("ذخیره و ری‌استارت", enabled = Regex("^[0-9A-F]{12}$").matches(mac) && mac != shown) {
             st.run("ذخیره شد؛ مودم ری‌استارت می‌شود") { setUsbMac(mac) }
+        }
+    }
+}
+
+// ---------------- AP Station ----------------
+
+private val STA_AUTH = listOf("OPEN" to "بدون رمز", "WPA2PSK" to "WPA2", "WPAPSKWPA2PSK" to "WPA / WPA2", "WPAPSK" to "WPA")
+
+@Composable
+private fun ApStationPage(st: AppState, back: () -> Unit) {
+    var ver by remember { mutableIntStateOf(0) }
+    var edit by remember { mutableStateOf<Hotspot?>(null) }
+    var del by remember { mutableStateOf<Hotspot?>(null) }
+    var found by remember { mutableStateOf<List<FoundWifi>?>(null) }
+    var scanning by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    SubPage("اینترنت از وای‌فای دیگر", back, "مودم به جای سیم‌کارت به یک وای‌فای دیگر (مثل وای‌فای خانه یا هتل) وصل می‌شود و همان را به دستگاه‌ها می‌دهد.") {
+        Load(st, ver, { apStation() to hotspots() }) { (d, list), _ ->
+            val on = d.s("wifi_sta_connection") == "1"
+            Group {
+                SwitchRow("این قابلیت روشن", if (d.s("m_ssid_enable") == "1") "با روشن شدنش، شبکهٔ مهمان خاموش می‌شود" else null, on, icon = Icons.Filled.Wifi, tint = K.cyan) { v ->
+                    st.run("ذخیره شد", then = { ver++ }) { setApStation(v) }
+                }
+            }
+            if (!on) return@Load
+            val cur = d.s("EX_wifi_profile")
+            val stat = d.s("sta_ip_status")
+            Group {
+                InfoRow(
+                    "اتصال", when (stat) { "connect" -> "وصل به ${d.s("EX_SSID1")}"; "connecting", "dhcping" -> "در حال وصل شدن…"; else -> "وصل نیست" },
+                    when (stat) { "connect" -> K.good; "connecting", "dhcping" -> K.warn; else -> K.dim },
+                )
+                InfoRow("اولویت", if ((d.s("wifiwan_priority").toIntOrNull() ?: 0) > (d.s("pswan_priority").toIntOrNull() ?: 0)) "اول وای‌فای، بعد سیم‌کارت" else "اول سیم‌کارت، بعد وای‌فای")
+            }
+            if (list.isEmpty()) Empty("هنوز وای‌فایی ذخیره نشده. جستجو کن یا با + اضافه کن.")
+            else Group(title = "وای‌فای‌های ذخیره‌شده (حداکثر ۱۰)") {
+                list.forEachIndexed { i, h ->
+                    if (i > 0) Divider()
+                    val isCur = h.profileName == cur && stat == "connect"
+                    Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconTile(Icons.Filled.Wifi, if (isCur) K.good else K.cyan)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(h.ssid, color = K.text, fontWeight = FontWeight.Bold)
+                            Text((STA_AUTH.firstOrNull { it.first == h.authMode }?.second ?: h.authMode) + if (isCur) "، وصل" else "", color = K.dim, fontSize = 12.sp)
+                        }
+                        if (isCur) TextButton(onClick = { st.run("قطع شد", then = { ver++ }) { disconnectHotspot() } }) { Text("قطع", color = K.bad) }
+                        else TextButton(onClick = { st.run("دستور وصل شدن رفت", then = { ver++ }) { connectHotspot(h) } }) { Text("وصل", color = K.ice) }
+                        IconButton(onClick = { edit = h }) { Icon(Icons.Filled.Edit, "ویرایش", tint = K.ice) }
+                        if (h.fromProvider != "1") IconButton(onClick = { del = h }) { Icon(Icons.Filled.Delete, "پاک کردن", tint = K.bad) }
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.weight(1f)) {
+                    GhostButton(if (scanning) "جستجو…" else "جستجو", Icons.Filled.Search, enabled = !scanning) {
+                        scanning = true
+                        scope.launch { found = st.io { scanWifi() }.getOrNull() ?: emptyList(); scanning = false }
+                    }
+                }
+                if (list.size < 10) Column(Modifier.weight(1f)) { GhostButton("افزودن دستی", Icons.Filled.Add) { edit = Hotspot("", ssid = "", authMode = "WPA2PSK", encryptType = "TKIPCCMP", password = "") } }
+            }
+            found?.let { f ->
+                if (f.isEmpty()) Empty("وای‌فایی پیدا نشد.")
+                else Group(title = "پیدا شده") {
+                    f.forEachIndexed { i, w ->
+                        if (i > 0) Divider()
+                        NavRow(Icons.Filled.Wifi, K.blue, w.ssid.ifEmpty { "(بی‌اسم)" }, "آنتن ${w.signal}") {
+                            edit = Hotspot("", ssid = w.ssid, authMode = w.authMode, encryptType = w.encryptType.ifEmpty { "TKIPCCMP" }, password = "", signal = w.signal, mac = w.mac)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    edit?.let { h ->
+        var ssid by remember(h) { mutableStateOf(h.ssid) }
+        var auth by remember(h) { mutableStateOf(h.authMode.ifEmpty { "WPA2PSK" }) }
+        var pass by remember(h) { mutableStateOf(h.password) }
+        AlertDialog(
+            onDismissRequest = { edit = null },
+            title = { Text(if (h.profileName.isEmpty()) "وای‌فای تازه" else "ویرایش ${h.ssid}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Field("اسم وای‌فای", ssid, { ssid = it.take(32) })
+                    Choice("امنیت", STA_AUTH.let { l -> if (l.none { it.first == auth }) l + (auth to auth) else l }, auth) { auth = it }
+                    if (auth != "OPEN") Field("رمز", pass, { pass = it.take(63) }, password = true, ltr = true, error = pass.isNotEmpty() && pass.length < 8)
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = ssid.isNotEmpty() && (auth == "OPEN" || pass.length >= 8), onClick = {
+                    edit = null
+                    val n = h.copy(ssid = ssid, authMode = auth, password = if (auth == "OPEN") "" else pass, encryptType = if (auth == "OPEN") "NONE" else h.encryptType.takeIf { it != "NONE" && it.isNotEmpty() } ?: "TKIPCCMP",
+                        mac = if (ssid != h.ssid) "0F:00:00:00:00:00" else h.mac)
+                    st.run("ذخیره شد", then = { ver++ }) { saveHotspot(n, hotspots()) }
+                }) { Text("ذخیره", color = K.ice) }
+            },
+            dismissButton = { TextButton(onClick = { edit = null }) { Text("لغو", color = K.dim) } },
+            containerColor = K.raised,
+        )
+    }
+    del?.let { h -> Ask("«${h.ssid}» پاک شود؟", "از فهرست وای‌فای‌های ذخیره‌شده پاک می‌شود.", "پاک کن", danger = true, onYes = { st.run("پاک شد", then = { ver++ }) { deleteHotspot(h, hotspots()) } }, onNo = { del = null }) }
+}
+
+// ---------------- parental control ----------------
+
+private val WEEK = listOf("یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه")
+
+@Composable
+private fun ParentalPage(st: AppState, back: () -> Unit) {
+    var ver by remember { mutableIntStateOf(0) }
+    var addSite by remember { mutableStateOf(false) }
+    SubPage("کنترل والدین", back, "برای دستگاه بچه‌ها: فقط در ساعت‌های انتخاب‌شده اینترنت دارند و فقط سایت‌های فهرست سفید باز می‌شوند.") {
+        Load(st, ver, { Triple(childDevices(), devices(), timeLimits()) to whiteSites() }) { (t, sites), _ ->
+            val (kids, all, times) = t
+            val me = st.status.s("client_mac_address")
+            Group(title = "دستگاه بچه‌ها") {
+                if (kids.isEmpty()) Text("هنوز دستگاهی نیست.", color = K.dim, modifier = Modifier.padding(16.dp))
+                kids.forEachIndexed { i, (mac, name) ->
+                    if (i > 0) Divider()
+                    Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconTile(Icons.Filled.Person, K.warn)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(name.ifEmpty { "دستگاه" }, color = K.text, fontWeight = FontWeight.Bold)
+                            Ltr { Text(mac.uppercase(), color = K.dim, fontSize = 12.sp, fontFamily = FontFamily.Monospace) }
+                        }
+                        TextButton(onClick = { st.run("برداشته شد", then = { ver++ }) { removeChild(mac) } }) { Text("بردار", color = K.bad) }
+                    }
+                }
+            }
+            val others = all.filter { d -> kids.none { it.first.equals(d.mac, true) } }
+            if (others.isNotEmpty()) Group(title = "افزودن از دستگاه‌های وصل") {
+                others.forEachIndexed { i, d ->
+                    if (i > 0) Divider()
+                    NavRow(Icons.Filled.Add, K.good, d.name.ifEmpty { d.mac }, d.ip) {
+                        st.run(if (d.mac.equals(me, true)) "اضافه شد؛ این گوشی هم محدود شد" else "اضافه شد", then = { ver++ }) { addChild(d.mac) }
+                    }
+                }
+            }
+            val grid = remember(times) { mutableStateMapOf<Int, Set<Int>>().apply { putAll(times) } }
+            Group(title = "ساعت‌های مجاز اینترنت", footer = "خانه‌های آبی یعنی آن ساعت اینترنت دارند. روی هر خانه بزن تا عوض شود؛ روی اسم روز بزن تا کل روز عوض شود.") {
+                Column(Modifier.padding(10.dp)) {
+                    Ltr {
+                        Row(Modifier.fillMaxWidth()) {
+                            Spacer(Modifier.width(54.dp))
+                            listOf(0, 6, 12, 18).forEach { h -> Text("$h", color = K.dim, fontSize = 10.sp, modifier = Modifier.weight(6f)) }
+                        }
+                    }
+                    (0..6).forEach { day ->
+                        Ltr {
+                            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(WEEK[day], color = K.text, fontSize = 11.sp, maxLines = 1,
+                                    modifier = Modifier.width(54.dp).clickable { grid[day] = if ((grid[day]?.size ?: 0) == 24) emptySet() else (0..23).toSet() })
+                                (0..23).forEach { h ->
+                                    val on = grid[day]?.contains(h) == true
+                                    Box(
+                                        Modifier.weight(1f).height(22.dp).padding(1.dp).clip(RoundedCornerShape(3.dp))
+                                            .background(if (on) K.blue else K.line)
+                                            .clickable { grid[day] = (grid[day] ?: emptySet()).let { if (on) it - h else it + h } },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            MainButton("ذخیرهٔ ساعت‌ها") { st.run("ذخیره شد", then = { ver++ }) { saveTimeLimits(grid.toMap()) } }
+            Group(title = "سایت‌های مجاز (فهرست سفید)") {
+                if (sites.isEmpty()) Text("فهرست خالی است.", color = K.dim, modifier = Modifier.padding(16.dp))
+                sites.forEachIndexed { i, w ->
+                    if (i > 0) Divider()
+                    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(w.name, color = K.text)
+                            Ltr { Text(w.site, color = K.dim, fontSize = 12.sp) }
+                        }
+                        IconButton(onClick = { st.run("پاک شد", then = { ver++ }) { removeWhiteSites(listOf(w.id)) } }) { Icon(Icons.Filled.Delete, "پاک کردن", tint = K.bad) }
+                    }
+                }
+            }
+            GhostButton("افزودن سایت", Icons.Filled.Add) { addSite = true }
+        }
+    }
+    if (addSite) {
+        var name by remember { mutableStateOf("") }
+        var site by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { addSite = false },
+            title = { Text("سایت مجاز") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Field("اسم", name, { name = it.take(32) })
+                    Field("آدرس", site, { site = it.trim().take(64) }, ltr = true, hint = "مثل www.example.com")
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = name.isNotBlank() && site.length >= 3, onClick = {
+                    addSite = false
+                    st.run("اضافه شد", then = { ver++ }) { addWhiteSite(name.trim(), site) }
+                }) { Text("افزودن", color = K.ice) }
+            },
+            dismissButton = { TextButton(onClick = { addSite = false }) { Text("لغو", color = K.dim) } },
+            containerColor = K.raised,
+        )
+    }
+}
+
+// ---------------- memory card ----------------
+
+@Composable
+private fun SdPage(st: AppState, back: () -> Unit) {
+    var ver by remember { mutableIntStateOf(0) }
+    var path by remember { mutableStateOf(SD_BASE) }
+    var page by remember { mutableIntStateOf(1) }
+    var newFolder by remember { mutableStateOf(false) }
+    var rename by remember { mutableStateOf<SdFile?>(null) }
+    var del by remember { mutableStateOf<SdFile?>(null) }
+    var saving by remember { mutableStateOf<SdFile?>(null) }
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val name = uri.lastPathSegment?.substringAfterLast('/')?.substringAfterLast(':') ?: "file"
+            val bytes = runCatching { ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+            if (bytes == null) st.message = "فایل خوانده نشد"
+            else st.run("فرستاده شد", "فرستاده نشد", then = { ver++ }) { sdUpload(path, name, bytes) }
+        }
+    }
+    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
+        val f = saving ?: return@rememberLauncherForActivityResult
+        saving = null
+        if (uri != null) scope.launch {
+            st.busy = true
+            val r = st.io { (net as Uploader).download(host, "$path/${f.name}") }
+            st.busy = false
+            r.onSuccess { b -> runCatching { ctx.contentResolver.openOutputStream(uri)?.use { it.write(b) } }; st.message = "ذخیره شد" }
+                .onFailure { st.message = st.netError(it) }
+        }
+    }
+    SubPage("کارت حافظه", back, "کارت حافظهٔ داخل مودم: فایل‌ها را ببین، بفرست یا بگیر، و اشتراک‌گذاری را تنظیم کن.") {
+        Load(st, ver, { sdConfig() to sdSpace() }) { (c, space), reload ->
+            val state = c.s("sd_card_state")
+            if (state != "1" || space == null) { Empty("کارت حافظه در مودم نیست یا آماده نیست."); return@Load }
+            Room(((space.first - space.second) / 1048576).toInt(), (space.first / 1048576).toInt(), "فضای کارت (مگابایت)")
+            val httpMode = c.s("sdcard_mode_option") == "1"
+            Segments(listOf("اشتراک در شبکه", "حافظهٔ USB"), if (httpMode) 0 else 1) { i ->
+                st.run("ذخیره شد", then = reload) { setSdMode(i == 0) }
+            }
+            if (!httpMode) { Text("در حالت USB، کارت فقط وقتی مودم با کابل به کامپیوتر وصل است دیده می‌شود.", color = K.dim, fontSize = 13.sp); return@Load }
+            var share by remember(c) { mutableStateOf(c.s("HTTP_SHARE_STATUS") == "Enabled") }
+            var rw by remember(c) { mutableStateOf(c.s("HTTP_SHARE_WR_AUTH") != "readOnly") }
+            Group(title = "اشتراک برای مهمان‌ها") {
+                SwitchRow("دیگران هم ببینند", "دستگاه‌های وصل بدون رمز مدیریت فایل‌ها را ببینند", share) { share = it }
+                if (share) { Divider(); SwitchRow("بتوانند فایل بفرستند و پاک کنند", null, rw) { rw = it } }
+            }
+            GhostButton("ذخیرهٔ اشتراک") { st.run("ذخیره شد", then = reload) { setSdSharing(share, rw, c.s("HTTP_SHARE_FILE").ifEmpty { SD_BASE }) } }
+        }
+        Load(st, Triple(ver, path, page), { sdList(path, page) }) { res, _ ->
+            if (res == null) return@Load
+            val (total, files) = res
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Ltr { Text(path.removePrefix(SD_BASE).ifEmpty { "/" }, color = K.ice, fontSize = 13.sp, modifier = Modifier.weight(1f)) }
+                if (path != SD_BASE) TextButton(onClick = { path = path.substringBeforeLast('/'); page = 1 }) { Text("بالاتر", color = K.ice) }
+            }
+            if (files.isEmpty()) Empty("این پوشه خالی است.")
+            else Group(title = "$total مورد") {
+                files.forEachIndexed { i, f ->
+                    if (i > 0) Divider()
+                    Row(
+                        Modifier.fillMaxWidth().clickable(enabled = f.folder) { path = "$path/${f.name}"; page = 1 }.padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconTile(if (f.folder) Icons.Filled.Folder else Icons.Filled.Description, if (f.folder) K.warn else K.cyan)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(f.name, color = K.text, maxLines = 1)
+                            Text(listOfNotNull(if (f.folder) null else Codec.iso(Codec.bytes(f.size)), f.time.ifEmpty { null }).joinToString("، "), color = K.dim, fontSize = 12.sp)
+                        }
+                        if (!f.folder) IconButton(onClick = { saving = f; save.launch(f.name) }) { Icon(Icons.Filled.Download, "گرفتن", tint = K.good) }
+                        IconButton(onClick = { rename = f }) { Icon(Icons.Filled.Edit, "تغییر اسم", tint = K.ice) }
+                        IconButton(onClick = { del = f }) { Icon(Icons.Filled.Delete, "پاک کردن", tint = K.bad) }
+                    }
+                }
+            }
+            val pages = (total + 9) / 10
+            if (pages > 1) Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(enabled = page > 1, onClick = { page-- }) { Text("قبلی", color = K.ice) }
+                Text("$page از $pages", color = K.dim)
+                TextButton(enabled = page < pages, onClick = { page++ }) { Text("بعدی", color = K.ice) }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.weight(1f)) { GhostButton("پوشهٔ تازه", Icons.Filled.CreateNewFolder) { newFolder = true } }
+                Column(Modifier.weight(1f)) { GhostButton("فرستادن فایل", Icons.Filled.Upload) { pick.launch(arrayOf("*/*")) } }
+            }
+        }
+    }
+    if (newFolder) NameDialog("پوشهٔ تازه", "") { n -> newFolder = false; if (n != null) st.run("ساخته شد", "ساخته نشد", then = { ver++ }) { sdNewFolder("$path/$n") } }
+    rename?.let { f -> NameDialog("اسم تازه", f.name) { n -> rename = null; if (n != null && n != f.name) st.run("اسم عوض شد", "عوض نشد", then = { ver++ }) { sdRename(path, f.name, n) } } }
+    del?.let { f -> Ask("«${f.name}» پاک شود؟", if (f.folder) "پوشه و هر چه داخلش است پاک می‌شود." else "فایل برای همیشه پاک می‌شود.", "پاک کن", danger = true,
+        onYes = { st.run("پاک شد", "پاک نشد", then = { ver++ }) { sdDelete(path, listOf(f.name)) } }, onNo = { del = null }) }
+}
+
+/** Asks for a file or folder name (the modem refuses * and a few other characters). */
+@Composable
+private fun NameDialog(title: String, start: String, done: (String?) -> Unit) {
+    var n by remember { mutableStateOf(start) }
+    val bad = n.isBlank() || n.any { it in "*/\\:?\"<>|" }
+    AlertDialog(
+        onDismissRequest = { done(null) },
+        title = { Text(title) },
+        text = { Field("اسم", n, { n = it.take(64) }, error = n.isNotEmpty() && bad) },
+        confirmButton = { TextButton(enabled = !bad, onClick = { done(n.trim()) }) { Text("ذخیره", color = K.ice) } },
+        dismissButton = { TextButton(onClick = { done(null) }) { Text("لغو", color = K.dim) } },
+        containerColor = K.raised,
+    )
+}
+
+// ---------------- quick setup ----------------
+
+@Composable
+private fun QuickSetupPage(st: AppState, back: () -> Unit) = SubPage("راه‌اندازی سریع", back, "تنظیم اینترنت (APN) و وای‌فای در یک جا، مثل راه‌اندازی سریع صفحهٔ مودم.") {
+    NeedsOffline(st)
+    Load(st, 0, { quickInfo() }) { d, reload ->
+        val idx = d.s("apn_index").ifEmpty { "0" }
+        val cfg = d.s("APN_configtmp$idx").split("(\$)")
+        var mode by remember(d) { mutableStateOf(d.s("apn_mode").ifEmpty { "auto" }) }
+        var name by remember(d) { mutableStateOf(cfg.getOrElse(0) { "" }) }
+        var apn by remember(d) { mutableStateOf(cfg.getOrElse(1) { "" }) }
+        var auth by remember(d) { mutableStateOf(cfg.getOrElse(4) { "none" }.lowercase().ifEmpty { "none" }) }
+        var user by remember(d) { mutableStateOf(cfg.getOrElse(5) { "" }) }
+        var apass by remember(d) { mutableStateOf(cfg.getOrElse(6) { "" }) }
+        var ssid by remember(d) { mutableStateOf(d.s("SSID1")) }
+        var hidden by remember(d) { mutableStateOf(d.s("HideSSID") == "1") }
+        var wauth by remember(d) { mutableStateOf(d.s("AuthMode").ifEmpty { "WPA2PSK" }) }
+        var wpass by remember(d) { mutableStateOf(runCatching { String(java.util.Base64.getDecoder().decode(d.s("WPAPSK1_encode"))) }.getOrDefault("")) }
+        val off = !st.connected
+        Group(title = "۱. اینترنت") {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Segments(listOf("خودکار", "دستی"), if (mode == "manual") 1 else 0) { mode = if (it == 1) "manual" else "auto" }
+                if (mode == "manual") {
+                    Field("اسم پروفایل", name, { name = it })
+                    Field("APN", apn, { apn = it.trim() }, ltr = true)
+                    Choice("احراز هویت", listOf("none" to "هیچ", "chap" to "CHAP", "pap" to "PAP", "pap_chap" to "PAP یا CHAP"), auth) { auth = it }
+                    if (auth != "none") { Field("نام کاربری", user, { user = it }, ltr = true); Field("رمز", apass, { apass = it }, ltr = true, password = true) }
+                }
+            }
+        }
+        Group(title = "۲. وای‌فای") {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Field("اسم وای‌فای", ssid, { ssid = it })
+                Choice("امنیت", listOf("OPEN" to "بدون رمز", "WPA2PSK" to "WPA2", "WPAPSKWPA2PSK" to "WPA / WPA2"), wauth) { wauth = it }
+                if (wauth != "OPEN") Field("رمز وای‌فای", wpass, { wpass = it }, ltr = true, password = true, hint = "۸ تا ۶۳ حرف")
+                SwitchRow("مخفی کردن اسم", null, hidden) { hidden = it }
+            }
+        }
+        val ok = ssid.toByteArray().size in 1..32 && (wauth == "OPEN" || wpass.length in 8..63) && (mode == "auto" || (name.isNotBlank() && apn.isNotBlank()))
+        MainButton("ذخیرهٔ همه", enabled = ok && off) {
+            st.run("ذخیره شد؛ وای‌فای چند ثانیه قطع می‌شود", then = reload) {
+                quickSetup(idx, mode, Apn(name, apn, auth, user, apass, d.s("pdp_type").ifEmpty { "IP" }), ssid, hidden, wauth, wpass)
+            }
         }
     }
 }

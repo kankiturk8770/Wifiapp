@@ -48,6 +48,10 @@ private class ShowModem : Transport {
         "m_ssid_enable" to "1", "m_SSID" to "Kanki-Guest", "m_AuthMode" to "WPA2PSK", "m_WPAPSK1_encode" to "Z3Vlc3QxMjM0", "m_MAX_Access_num" to "5",
         "vpn_state" to "open", "connect_status" to "connected", "vpn_type" to "l2tp", "vpn_server_ip" to "vpn.example.com", "vpn_name" to "kanki",
         "wifi_band" to "b", "wifi_11n_cap" to "1",
+        "wifi_sta_connection" to "1", "sta_ip_status" to "connect", "EX_SSID1" to "Hotel-Lobby", "EX_wifi_profile" to "p1", "pswan_priority" to "1", "wifiwan_priority" to "2",
+        "wifi_profile" to "p1,0,1,4,Hotel-Lobby,WPA2PSK,TKIPCCMP,lobby2026,0,AA:BB:CC:00:11:22;p2,0,0,2,Home-5G,WPAPSKWPA2PSK,TKIPCCMP,homepass1,0,0F:00:00:00:00:00",
+        "sd_card_state" to "1", "sdcard_mode_option" to "1", "HTTP_SHARE_STATUS" to "Enabled", "HTTP_SHARE_WR_AUTH" to "readWrite", "HTTP_SHARE_FILE" to "/mmc2",
+        "apn_index" to "0", "pdp_type" to "IP",
         "ussd_enable" to "1", "cstm_webui_dns" to "1", "dns_manual_enable" to "0",
     )
 
@@ -56,7 +60,10 @@ private class ShowModem : Transport {
     }
 
     override fun send(host: String, path: String, form: String?): String {
-        if (form != null) return """{"result":"success"}"""
+        if (form != null) {
+            return if (form.contains("HTTPSHARE_ENTERFOLD")) """{"result":{"totalRecord":"3","fileInfo":[{"fileName":"Music","attribute":"document","size":"0","lastUpdateTime":"2026-11-01"},{"fileName":"Photos","attribute":"document","size":"0","lastUpdateTime":"2026-10-20"},{"fileName":"notes.pdf","attribute":"file","size":"1830000","lastUpdateTime":"2026-11-07"}]}}"""
+            else """{"result":"success"}"""
+        }
         val cmd = q(path.substringAfter('?'))["cmd"] ?: return "{}"
         return when (cmd) {
             "station_list" -> JSONObject().put("station_list", JSONArray(
@@ -77,6 +84,10 @@ private class ShowModem : Transport {
             "sms_parameter_info" -> """{"sms_para_sca":"+905329000111","sms_para_validity_period":"167","sms_para_status_report":"0"}"""
             "sms_capacity_info" -> """{"sms_nv_total":"100","sms_nv_rev_total":"12","sms_nv_send_total":"4","sms_nv_draftbox_total":"0","sms_sim_total":"40","sms_sim_rev_total":"2"}"""
             "upnpEnabled" -> """{"upnpEnabled":"1"}"""
+            "childGroupList" -> """{"devices":[{"mac":"3C:22:FB:01:02:03","hostname":"تبلت بچه"}]}"""
+            "time_limited" -> """{"time_limited":"0+8,9,10,11,16,17,18,19;1+16,17,18,19;6+8,9,10,11,12,13,14,15,16,17,18,19,20"}"""
+            "site_white_list" -> """{"siteList":[{"id":"1","name":"آپارات","site":"www.aparat.com"}]}"""
+            "HTTPSHARE_GETCARD_VALUE" -> """{"sd_card_total_size":"947200","sd_card_avi_space":"612000"}"""
             "websURLFilters" -> """{"websURLFilters":"instagram.com;tiktok.com"}"""
             "get_support_band" -> """{"LTE_B1":"1","LTE_B3":"1","LTE_B7":"1","LTE_B20":"1","WCDMA_B1":"1"}"""
             "set_band_list" -> """{"set_band_list":"LTE_B3,LTE_B7"}"""
@@ -111,7 +122,16 @@ class Shots {
         }
     }
 
-    private fun shot(st: AppState, ui: @Composable (AppState) -> Unit = { App(it) }) = paparazzi.snapshot { Theme { ui(st) } }
+    // Paparazzi has no Activity; file pickers only need something to register with.
+    private val noResults = object : androidx.activity.result.ActivityResultRegistryOwner {
+        override val activityResultRegistry = object : androidx.activity.result.ActivityResultRegistry() {
+            override fun <I, O> onLaunch(requestCode: Int, contract: androidx.activity.result.contract.ActivityResultContract<I, O>, input: I, options: androidx.core.app.ActivityOptionsCompat?) {}
+        }
+    }
+
+    private fun shot(st: AppState, ui: @Composable (AppState) -> Unit = { App(it) }) = paparazzi.snapshot {
+        androidx.compose.runtime.CompositionLocalProvider(androidx.activity.compose.LocalActivityResultRegistryOwner provides noResults) { Theme { ui(st) } }
+    }
 
     @Test fun login() = shot(state(loggedIn = false))
     @Test fun home() = shot(state())
@@ -146,5 +166,9 @@ class Shots {
     @Test fun pageBands() = page("bands")
     @Test fun pageVpn() = page("vpn")
     @Test fun pageUrl() = page("urlfilter")
+    @Test fun pageApStation() = page("apstation")
+    @Test fun pageParental() = page("parental")
+    @Test fun pageSd() = page("sd")
+    @Test fun pageQuick() = page("quick")
     @Test fun homeSimPin() = shot(state().apply { status = JSONObject(status.toString()).put("modem_main_state", "modem_waitpin").put("pinnumber", "3") })
 }

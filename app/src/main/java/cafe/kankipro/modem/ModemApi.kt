@@ -12,6 +12,12 @@ interface Transport {
 
 class ApiError(msg: String) : Exception(msg)
 
+/** File upload (multipart), only the real HTTP transport has it. */
+interface Uploader {
+    fun upload(host: String, path: String, field: String, fileName: String, bytes: ByteArray, extra: Map<String, String> = emptyMap()): String
+    fun download(host: String, path: String): ByteArray
+}
+
 /**
  * Talks to the modem the same way its own web page (js/com.js, module "service") does:
  *   read:   GET  /goform/goform_get_cmd_process?cmd=a,b,c&multi_data=1
@@ -21,7 +27,7 @@ class ApiError(msg: String) : Exception(msg)
  * Wi-Fi passwords travel as Base64. When false (newer firmware), they are AES-192-CBC with
  * key/iv taken from (rnum_js + imei + "FFFF..."), see [Codec.modemAes].
  */
-class ModemApi(private val net: Transport) {
+class ModemApi(internal val net: Transport) {
     @Volatile var host: String = "192.168.0.1"
     /** null = not read yet. */
     @Volatile var passwordEncode: Boolean? = null

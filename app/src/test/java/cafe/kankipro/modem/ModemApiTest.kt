@@ -301,3 +301,42 @@ class ExtPagesTest {
         assertEquals(mapOf("isTest" to "false", "goformId" to "GOFORM_OPEN_VPN", "vpn_name" to "u", "vpn_password" to "p", "vpn_server_ip" to "1.2.3.4", "vpn_type" to "l2tp"), m.posts.last())
     }
 }
+
+class LastPagesTest {
+    @Test fun hotspotsRoundTrip() {
+        val m = Recorder(mapOf(
+            "wifi_profile" to "p1,0,1,4,Home,WPA2PSK,TKIPCCMP,secret123,0,AA:BB:CC:00:11:22;p2,0,0,2,Cafe,OPEN,NONE,0,0,0F:00:00:00:00:00",
+        ))
+        val api = ModemApi(m)
+        val list = api.hotspots()
+        assertEquals(listOf("Home", "Cafe"), list.map { it.ssid })
+        assertEquals("secret123", list[0].password); assertEquals("", list[1].password)
+        api.deleteHotspot(list[1], list)
+        val p = m.posts.last()
+        assertEquals("WIFI_SPOT_PROFILE_UPDATE", p["goformId"]); assertEquals("delete", p["action"]); assertEquals("1", p["wifi_profile_num"])
+        assertEquals("p1,0,1,4,Home,WPA2PSK,TKIPCCMP,secret123,0,AA:BB:CC:00:11:22", p["wifi_profile"])
+    }
+
+    @Test fun timeLimitsRoundTrip() {
+        val m = parseTimeLimits("0+8,9,10;3+20,21")
+        assertEquals(setOf(8, 9, 10), m[0]); assertEquals(setOf(20, 21), m[3])
+        assertEquals("0+8,9,10;3+20,21", timeLimitText(m))
+    }
+
+    @Test fun sdListAndDelete() {
+        val m = object : Transport {
+            val posts = mutableListOf<String>()
+            override fun send(host: String, path: String, form: String?): String {
+                if (form != null) { posts += URLDecoder.decode(form, "UTF-8")
+                    return if (form.contains("HTTPSHARE_ENTERFOLD")) """{"result":{"totalRecord":"2","fileInfo":[{"fileName":"Music","attribute":"document","size":"0","lastUpdateTime":""},{"fileName":"a.mp3","attribute":"file","size":"2048","lastUpdateTime":"2026"}]}}"""
+                    else """{"result":"success"}""" }
+                return "{}"
+            }
+        }
+        val api = ModemApi(m)
+        val (n, files) = api.sdList("/mmc2", 1)!!
+        assertEquals(2, n); assertTrue(files[0].folder); assertEquals("a.mp3", files[1].name)
+        assertTrue(api.sdDelete("/mmc2", listOf("a.mp3", "b")))
+        assertTrue(m.posts.last().contains("name_SD_CARD=a.mp3*b*"))
+    }
+}
