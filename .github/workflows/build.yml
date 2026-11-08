@@ -16,9 +16,9 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
+      # GitHub's Ubuntu runners already have the Android SDK (ANDROID_HOME).
       - name: Test and build
-        run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
+        run: chmod +x gradlew && ./gradlew --no-daemon testDebugUnitTest assembleRelease
       - name: Name the APK
         run: |
           v=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
