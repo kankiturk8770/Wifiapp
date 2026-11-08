@@ -35,24 +35,29 @@ object BandProbe {
      * Each try is one sample; a try that fails or takes over [timeoutMs] counts as lost.
      */
     fun pingSeries(net: Network?, count: Int = 20, host: String = "1.1.1.1", port: Int = 443, timeoutMs: Int = 1500, gapMs: Long = 150): Triple<Double?, Double?, Double> {
-        val got = mutableListOf<Double>()
-        repeat(count) {
-            val t = runCatching {
-                Socket().use { s ->
-                    net?.bindSocket(s)
-                    val start = System.nanoTime()
-                    s.connect(InetSocketAddress(host, port), timeoutMs)
-                    (System.nanoTime() - start) / 1e6
-                }
-            }.getOrNull()
-            if (t != null) got += t
-            Thread.sleep(gapMs)
+        val all = List(count) { pingOnce(net, host, port, timeoutMs).also { Thread.sleep(gapMs) } }
+        val (avg, jitter, loss) = summary(all)
+        return Triple(avg, jitter, loss ?: 100.0)
+    }
+
+    /** One ping (TCP connect time) in ms, or null when it did not answer. */
+    fun pingOnce(net: Network?, host: String = "1.1.1.1", port: Int = 443, timeoutMs: Int = 1500): Double? = runCatching {
+        Socket().use { s ->
+            net?.bindSocket(s)
+            val start = System.nanoTime()
+            s.connect(InetSocketAddress(host, port), timeoutMs)
+            (System.nanoTime() - start) / 1e6
         }
-        val loss = 100.0 * (count - got.size) / count
+    }.getOrNull()
+
+    /** Average, jitter (mean change between pings) and loss % of samples; null = lost. */
+    fun summary(samples: List<Double?>): Triple<Double?, Double?, Double?> {
+        if (samples.isEmpty()) return Triple(null, null, null)
+        val got = samples.filterNotNull()
+        val loss = 100.0 * (samples.size - got.size) / samples.size
         if (got.isEmpty()) return Triple(null, null, loss)
-        val avg = got.average()
         val jitter = if (got.size < 2) 0.0 else got.zipWithNext { a, b -> kotlin.math.abs(a - b) }.average()
-        return Triple(avg, jitter, loss)
+        return Triple(got.average(), jitter, loss)
     }
 
     /** A short download (about [bytes]) to see the speed; stops after [maxMs]. */

@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -18,6 +19,17 @@ class HttpTransport(ctx: Context) : Transport, Uploader {
 
     /** The Wi-Fi network the modem is on (tests that go through the modem use it too). */
     fun wifiNetwork(): Network? = wifi()
+
+    /**
+     * Asks Android to keep the modem's Wi-Fi up even while it has no internet (a band change cuts the
+     * modem's internet for a few seconds, and some phones then leave that Wi-Fi). Call the result to let go.
+     */
+    fun holdWifi(): () -> Unit {
+        val cb = object : ConnectivityManager.NetworkCallback() {}
+        val req = NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build()
+        return runCatching { cm.requestNetwork(req, cb); { runCatching { cm.unregisterNetworkCallback(cb) }; Unit } }.getOrElse { {} }
+    }
 
     @Suppress("DEPRECATION")
     private fun wifi(): Network? = cm.allNetworks.firstOrNull {

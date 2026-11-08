@@ -1,5 +1,8 @@
 package cafe.kankipro.modem
 
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.navigationBarsPadding
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -118,6 +121,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -155,15 +159,24 @@ fun App(st: AppState) {
         bottomBar = { if (st.loggedIn && st.pages.isEmpty()) BottomBar(st) },
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize().background(K.bg)) {
-            when {
-                !st.loggedIn -> LoginScreen(st)
-                st.pages.isNotEmpty() -> PageHost(st, st.pages.last())
-                else -> when (st.tab) {
-                    Tab.HOME -> HomeScreen(st)
-                    Tab.WIFI -> WifiScreen(st)
-                    Tab.DEVICES -> DevicesScreen(st)
-                    Tab.SMS -> SmsScreen(st)
-                    Tab.SETTINGS -> SettingsScreen(st)
+            // Each tab and each page keeps its own scroll place and choices, so coming back lands where you were.
+            val keep = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+            val place = when {
+                !st.loggedIn -> "login"
+                st.pages.isNotEmpty() -> "page:" + st.pages.joinToString("/")
+                else -> "tab:" + st.tab.name
+            }
+            keep.SaveableStateProvider(place) {
+                when {
+                    !st.loggedIn -> LoginScreen(st)
+                    st.pages.isNotEmpty() -> PageHost(st, st.pages.last())
+                    else -> when (st.tab) {
+                        Tab.HOME -> HomeScreen(st)
+                        Tab.WIFI -> WifiScreen(st)
+                        Tab.DEVICES -> DevicesScreen(st)
+                        Tab.SMS -> SmsScreen(st)
+                        Tab.SETTINGS -> SettingsScreen(st)
+                    }
                 }
             }
             if (st.busy && st.loggedIn) {
@@ -189,18 +202,26 @@ private fun BottomBar(st: AppState) {
         Triple(Tab.SMS, Icons.AutoMirrored.Filled.Message, if (n > 0) "پیامک $n" else "پیامک"),
         Triple(Tab.SETTINGS, Icons.Filled.Tune, "تنظیمات"),
     )
-    NavigationBar(containerColor = K.card, tonalElevation = 0.dp) {
-        items.forEach { (tab, icon, label) ->
-            NavigationBarItem(
-                selected = st.tab == tab,
-                onClick = { st.tab = tab },
-                icon = { Icon(icon, null) },
-                label = { Text(label, fontSize = 11.sp, maxLines = 1) },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = Color.White, selectedTextColor = K.ice,
-                    unselectedIconColor = K.dim, unselectedTextColor = K.dim, indicatorColor = K.blue,
-                ),
-            )
+    // A slim bar: the chosen tab gets a small blue pill behind its icon, nothing else moves.
+    Column(Modifier.fillMaxWidth().background(K.bg).navigationBarsPadding()) {
+        HorizontalDivider(color = K.line, thickness = 1.dp)
+        Row(Modifier.fillMaxWidth().height(60.dp)) {
+            items.forEach { (tab, icon, label) ->
+                val on = st.tab == tab
+                Column(
+                    Modifier.weight(1f).fillMaxHeight().clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null,
+                    ) { st.tab = tab },
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+                ) {
+                    Box(
+                        Modifier.size(width = 48.dp, height = 28.dp).clip(RoundedCornerShape(14.dp)).background(if (on) K.blue else Color.Transparent),
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(icon, null, tint = if (on) Color.White else K.dim, modifier = Modifier.size(20.dp)) }
+                    Spacer(Modifier.height(3.dp))
+                    Text(label, fontSize = 10.5.sp, maxLines = 1, color = if (on) K.text else K.dim, fontWeight = if (on) FontWeight.Medium else FontWeight.Normal)
+                }
+            }
         }
     }
 }
@@ -209,7 +230,7 @@ private fun BottomBar(st: AppState) {
 private fun Page(content: @Composable ColumnScope.() -> Unit) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) { content(); Spacer(Modifier.height(16.dp)) }
 }
 
@@ -217,8 +238,8 @@ private fun Page(content: @Composable ColumnScope.() -> Unit) {
 private fun Heading(title: String, sub: String? = null, action: (@Composable () -> Unit)? = null) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 26.sp, fontWeight = FontWeight.Black, color = K.text)
-            if (sub != null) Text(sub, fontSize = 13.sp, color = K.dim)
+            Text(title, fontSize = 22.sp, fontWeight = FontWeight.Black, color = K.text)
+            if (sub != null) Text(sub, fontSize = 12.5.sp, color = K.dim, lineHeight = 18.sp)
         }
         action?.invoke()
     }
@@ -524,7 +545,7 @@ fun netName(t: String): String = when (t.uppercase()) {
 
 @Composable
 private fun WifiScreen(st: AppState) {
-    var ver by remember { mutableIntStateOf(0) }
+    var ver by rememberSaveable { mutableIntStateOf(0) }
     Page {
         Heading("وای‌فای", "اسم، رمز و هر چیزی که به وای‌فای مودم مربوط است")
         Load(st, ver, { wifi() }) { w, reload ->
@@ -635,7 +656,7 @@ private fun WifiQrDialog(ssid: String, pass: String, auth: String, hidden: Boole
 
 @Composable
 private fun DevicesScreen(st: AppState) {
-    var ver by remember { mutableIntStateOf(0) }
+    var ver by rememberSaveable { mutableIntStateOf(0) }
     var edit by remember { mutableStateOf<Device?>(null) }
     var block by remember { mutableStateOf<Device?>(null) }
     Page {
@@ -726,9 +747,9 @@ data class Compose(val to: String = "", val text: String = "", val draftId: Stri
 
 @Composable
 private fun SmsScreen(st: AppState) {
-    var ver by remember { mutableIntStateOf(0) }
-    var box by remember { mutableIntStateOf(0) } // 0 inbox, 1 sent, 2 drafts, 3 SIM
-    var open by remember { mutableStateOf<String?>(null) }
+    var ver by rememberSaveable { mutableIntStateOf(0) }
+    var box by rememberSaveable { mutableIntStateOf(0) } // 0 inbox, 1 sent, 2 drafts, 3 SIM
+    var open by rememberSaveable { mutableStateOf<String?>(null) }
     var del by remember { mutableStateOf<Sms?>(null) }
     var delAll by remember { mutableStateOf<List<String>?>(null) }
     val ctx = LocalContext.current

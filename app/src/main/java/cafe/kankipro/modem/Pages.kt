@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
@@ -52,6 +53,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -188,7 +190,7 @@ private fun NetworkPage(st: AppState, back: () -> Unit) {
 private fun ApnPage(st: AppState, back: () -> Unit) {
     var edit by remember { mutableStateOf<Pair<Int, Apn>?>(null) }
     var del by remember { mutableStateOf<Int?>(null) }
-    var ver by remember { mutableIntStateOf(0) }
+    var ver by rememberSaveable { mutableIntStateOf(0) }
     SubPage("APN", back, "تنظیم اتصال اپراتور. معمولاً «خودکار» درست است؛ فقط اگر اپراتور APN خاص داده دستی کن.") {
         NeedsOffline(st)
         Load(st, ver, { apns() }) { info, _ ->
@@ -552,7 +554,7 @@ private fun protoName(v: String) = when (v.uppercase()) { "TCP&UDP", "3", "TCP+U
 
 @Composable
 private fun ForwardPage(st: AppState, back: () -> Unit) {
-    var ver by remember { mutableIntStateOf(0) }
+    var ver by rememberSaveable { mutableIntStateOf(0) }
     SubPage("فوروارد پورت", back, "درخواست‌هایی که از اینترنت به این پورت‌ها می‌آید به یک دستگاه داخل شبکه برود.") {
         Load(st, ver, { portForward() }) { (on, rules), _ ->
             var ip by remember { mutableStateOf("") }
@@ -580,7 +582,7 @@ private fun ForwardPage(st: AppState, back: () -> Unit) {
 
 @Composable
 private fun FilterPage(st: AppState, back: () -> Unit) {
-    var ver by remember { mutableIntStateOf(0) }
+    var ver by rememberSaveable { mutableIntStateOf(0) }
     SubPage("فیلتر پورت و IP", back, "ترافیک را بر اساس آدرس، پورت و پروتکل ببند یا باز کن.") {
         Load(st, ver, { portFilter() }) { (on, policy0, rules), _ ->
             var policy by remember(policy0) { mutableStateOf(policy0.ifEmpty { "0" }) }
@@ -640,7 +642,7 @@ private fun FilterPage(st: AppState, back: () -> Unit) {
 
 @Composable
 private fun MapPage(st: AppState, back: () -> Unit) {
-    var ver by remember { mutableIntStateOf(0) }
+    var ver by rememberSaveable { mutableIntStateOf(0) }
     SubPage("نگاشت پورت", back, "یک پورت بیرونی به پورت دیگری روی یک دستگاه داخل شبکه برود.") {
         Load(st, ver, { portMap() }) { (on, rules), _ ->
             var from by remember { mutableStateOf("") }
@@ -666,7 +668,7 @@ private fun MapPage(st: AppState, back: () -> Unit) {
 
 @Composable
 private fun RatePage(st: AppState, back: () -> Unit) {
-    var ver by remember { mutableIntStateOf(0) }
+    var ver by rememberSaveable { mutableIntStateOf(0) }
     SubPage("محدود کردن سرعت", back, "سرعت دانلود و آپلود یک دستگاه (با IP آن) را محدود کن.") {
         Load(st, ver, { rateLimit() }) { (on, rules), _ ->
             var ip by remember { mutableStateOf("") }
@@ -809,7 +811,7 @@ private val GROUPS = listOf("common" to "عمومی", "family" to "خانواد�
 
 @Composable
 private fun ContactsPage(st: AppState, back: () -> Unit) {
-    var ver by remember { mutableIntStateOf(0) }
+    var ver by rememberSaveable { mutableIntStateOf(0) }
     var edit by remember { mutableStateOf<Contact?>(null) }
     var del by remember { mutableStateOf<Contact?>(null) }
     var delAll by remember { mutableStateOf<Int?>(null) }
@@ -1140,7 +1142,7 @@ private fun SimLockPage(st: AppState, back: () -> Unit) = SubPage("باز کرد
 
 @Composable
 private fun UrlFilterPage(st: AppState, back: () -> Unit) {
-    var ver by remember { mutableIntStateOf(0) }
+    var ver by rememberSaveable { mutableIntStateOf(0) }
     var add by remember { mutableStateOf("") }
     SubPage("فیلتر سایت", back, "سایت‌هایی که در این فهرست باشند از هیچ دستگاهی که به مودم وصل است باز نمی‌شوند. حداکثر ۱۰ سایت.") {
         Load(st, ver, { urlFilters() }) { list, _ ->
@@ -1227,74 +1229,100 @@ private fun BandPage(st: AppState, back: () -> Unit) {
     }
 }
 
-/** "Best band for games": lock each 4G band in turn and measure it, right on the band page. */
+/**
+ * "Best band for games", right on the band page. Two ways:
+ *  - live: measures the band the modem is on now, every 2 s, without changing anything (default);
+ *  - full test: locks each 4G band in turn (cuts the internet for a moment each time).
+ */
 @Composable
 private fun BandTester(st: AppState, all: List<String>, chosen: List<String>, reload: () -> Unit) {
     val lte = all.filter { it.startsWith("LTE") }
     if (lte.isEmpty()) return
     var start by remember { mutableStateOf(false) }
-    var speed by remember { mutableStateOf(true) }
+    var speed by rememberSaveable { mutableStateOf(false) }
+    var full by rememberSaveable { mutableStateOf(false) }
     var lock by remember { mutableStateOf<String?>(null) }
+    // The live measure runs only while this page is open.
+    androidx.compose.runtime.DisposableEffect(Unit) { st.startLive(); onDispose { st.stopLive() } }
+
+    st.liveTick // read so the cards redraw on each sample
+    val now = st.live[st.liveBand]
+    val others = st.live.values.filter { it.band != st.liveBand && it.pings.isNotEmpty() }.map { st.liveResult(it) }.sortedBy { it.score ?: Double.MAX_VALUE }
+    Group(title = "سنجش زنده (بدون قطعی)", footer = "باند را عوض نمی‌کند؛ هر ۲ ثانیه یک پینگ از همان باندی که مودم الان رویش است. اگر مودم خودش باند عوض کند، آن باند هم جدا اضافه می‌شود. وقتی بازی می‌کنی هم می‌شود این صفحه را باز گذاشت.") {
+        if (st.bandTestRunning) Text("وقتی تست کامل در حال اجراست، سنجش زنده صبر می‌کند.", color = K.dim, fontSize = 13.sp, modifier = Modifier.padding(14.dp))
+        else if (now == null) Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.CircularProgressIndicator(color = K.blue, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(10.dp))
+            Text("در حال خواندن باند فعلی…", color = K.dim, fontSize = 13.sp)
+        }
+    }
+    if (!st.bandTestRunning && now != null) BandCard(st.liveResult(now), best = false, rank = null, enabled = false, live = true, onLock = {})
+    others.forEach { r -> BandCard(r, best = false, rank = null, enabled = !st.bandTestRunning, onLock = { lock = r.band }) }
+
+    Group(title = "تست کامل همهٔ باندها") {
+        SwitchRow("نشان بده", "مودم را یکی‌یکی روی هر باند 4G قفل می‌کند", full || st.bandTestRunning || st.bandResults.isNotEmpty(), enabled = !st.bandTestRunning) { full = it; if (!it) st.bandResults.clear() }
+        if (full || st.bandTestRunning || st.bandResults.isNotEmpty()) {
+            Divider()
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (!st.bandTestRunning && st.bandResults.isEmpty()) Text(
+                    "هر بار عوض کردن باند اینترنت مودم را چند ثانیه قطع می‌کند. برنامه از گوشی می‌خواهد وای‌فای مودم را نگه دارد، ولی بعضی گوشی‌ها باز هم وای‌فای بی‌اینترنت را رها می‌کنند؛ آن وقت در تنظیمات وای‌فای گوشی «سوییچ خودکار به دیتا» را خاموش کن. حدود ${lte.size} دقیقه؛ وسط بازی نزن. آخر کار باندهای قبلی خودشان برمی‌گردند.",
+                    color = K.dim, fontSize = 12.5.sp, lineHeight = 19.sp,
+                )
+                if (st.bandTestStep.isNotEmpty() && (st.bandTestRunning || st.bandResults.isNotEmpty())) Text(st.bandTestStep, color = if (st.bandTestRunning) K.text else K.good, fontSize = 13.sp)
+                if (st.bandTestRunning) androidx.compose.material3.LinearProgressIndicator(
+                    progress = { st.bandTestProgress }, modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+                    color = K.blue, trackColor = K.line, drawStopIndicator = {},
+                )
+                if (st.bandTestRunning) GhostButton("توقف (باندها برمی‌گردند)", color = K.bad) { st.stopBandTest() }
+                else MainButton(if (st.bandResults.isEmpty()) "شروع تست ${lte.size} باند" else "تست دوباره", icon = Icons.Filled.Speed) { start = true }
+            }
+            if (!st.bandTestRunning) {
+                Divider()
+                SwitchRow("تست سرعت هم بگیرد", "حدود ۳ مگ اینترنت برای هر باند", speed) { speed = it }
+            }
+        }
+    }
     val res = st.bandResults
     val ranked = res.filter { it.reached && it.score != null }.sortedBy { it.score }
     val best = ranked.firstOrNull()?.band
-    Group(title = "بهترین باند برای بازی", footer = if (st.bandTestRunning) null else
-        "مودم را یکی‌یکی روی هر باند 4G قفل می‌کند و پینگ، لرزش، افت، آنتن و سرعت را می‌سنجد (۳ تا ۶ دقیقه). اینترنت در این مدت چند بار قطع و وصل می‌شود؛ وسط بازی نزن. آخر کار همهٔ باندها خودشان دوباره روشن می‌شوند. نتیجه برای همین جا و همین ساعت است.") {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (st.bandTestRunning || st.bandTestStep.isNotEmpty()) {
-                Text(st.bandTestStep, color = if (st.bandTestRunning) K.text else K.good, fontSize = 13.sp)
-                if (st.bandTestRunning) androidx.compose.material3.LinearProgressIndicator(
-                    progress = { st.bandTestProgress }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                    color = K.blue, trackColor = K.line, drawStopIndicator = {},
-                )
-            }
-            if (st.bandTestRunning) {
-                GhostButton("توقف (باندها دوباره روشن می‌شوند)", color = K.bad) { st.stopBandTest() }
-            } else {
-                MainButton(if (res.isEmpty()) "شروع تست ${lte.size} باند" else "تست دوباره", icon = Icons.Filled.Speed) { start = true }
-            }
-        }
-        if (!st.bandTestRunning) {
-            Divider()
-            SwitchRow("تست سرعت هم بگیرد", "حدود ۳ مگ اینترنت برای هر باند", speed) { speed = it }
-        }
-    }
     if (res.isNotEmpty()) {
-        val order = ranked + res.filter { it !in ranked }
-        order.forEach { r -> BandCard(r, r.band == best, ranked.indexOf(r).takeIf { it >= 0 }?.plus(1), enabled = !st.bandTestRunning) { lock = r.band } }
-        if (!st.bandTestRunning && res.size > 1) GhostButton("همهٔ باندها روشن", Icons.Filled.Refresh) {
-            st.run("همهٔ باندها روشن شد", then = reload) { setBands(all) }
+        (ranked + res.filter { it !in ranked }).forEach { r ->
+            BandCard(r, r.band == best, ranked.indexOf(r).takeIf { it >= 0 }?.plus(1), enabled = !st.bandTestRunning) { lock = r.band }
         }
     }
-    if (start) Ask("تست شروع شود؟", "حدود ${lte.size} دقیقه طول می‌کشد و اینترنت مودم چند بار قطع و وصل می‌شود.", "شروع کن",
+    if (!st.bandTestRunning && chosen.size == 1 && all.size > 1) GhostButton("مودم روی یک باند قفل است؛ همه را روشن کن", Icons.Filled.Refresh) {
+        st.run("همهٔ باندها روشن شد", then = reload) { setBands(all) }
+    }
+    if (start) Ask("تست کامل شروع شود؟", "حدود ${lte.size} دقیقه طول می‌کشد و اینترنت مودم چند بار قطع و وصل می‌شود.", "شروع کن",
         onYes = {
             start = false
-            // Put back what the person had (if it had any 4G), else all bands.
             val restore = if (chosen.any { it.startsWith("LTE") }) chosen else all
             st.startBandTest(lte, restore, speed) { reload() }
         }, onNo = { start = false })
     lock?.let { b ->
-        Ask("قفل روی ${bandName(b)}؟", "مودم فقط روی همین باند وصل می‌شود. اگر جای دیگری رفتی و آنتن نداد، از همین صفحه «همهٔ باندها روشن» را بزن.", "قفل کن",
+        Ask("قفل روی ${bandName(b)}؟", "مودم فقط روی همین باند وصل می‌شود. اگر جای دیگری رفتی و آنتن نداد، از همین صفحه همهٔ باندها را روشن کن.", "قفل کن",
             onYes = { lock = null; st.run("روی ${bandName(b)} قفل شد", then = reload) { setBands(listOf(b)) } }, onNo = { lock = null })
     }
 }
 
 @Composable
-private fun BandCard(r: BandResult, best: Boolean, rank: Int?, enabled: Boolean, onLock: () -> Unit) {
-    val border = if (best) K.good else K.line
+private fun BandCard(r: BandResult, best: Boolean, rank: Int?, enabled: Boolean, live: Boolean = false, onLock: () -> Unit) {
+    val border = if (best) K.good else if (live) K.blue else K.line
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(K.card)
-            .then(Modifier.border(if (best) 1.5.dp else 1.dp, border, RoundedCornerShape(18.dp)))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(K.card)
+            .border(if (best || live) 1.5.dp else 1.dp, border, RoundedCornerShape(16.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.clip(RoundedCornerShape(10.dp)).background(if (best) K.good.copy(alpha = .18f) else K.raised).padding(horizontal = 10.dp, vertical = 4.dp)) {
-                Text(rank?.toString() ?: "–", color = if (best) K.good else K.dim, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            if (live) Box(Modifier.clip(RoundedCornerShape(8.dp)).background(K.blue).padding(horizontal = 8.dp, vertical = 3.dp)) {
+                Text("الان", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            } else Box(Modifier.clip(RoundedCornerShape(8.dp)).background(if (best) K.good.copy(alpha = .18f) else K.raised).padding(horizontal = 9.dp, vertical = 3.dp)) {
+                Text(rank?.toString() ?: "–", color = if (best) K.good else K.dim, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(bandName(r.band), color = K.text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text(bandName(r.band), color = K.text, fontWeight = FontWeight.Bold, fontSize = 14.5.sp)
                 val sub = when {
                     best -> "بهترین برای بازی"
                     !r.reached -> r.note
@@ -1302,18 +1330,18 @@ private fun BandCard(r: BandResult, best: Boolean, rank: Int?, enabled: Boolean,
                 }
                 if (sub.isNotEmpty()) Text(sub, color = if (best) K.good else if (!r.reached) K.bad else K.dim, fontSize = 12.sp)
             }
-            if (r.reached) TextButton(onClick = onLock, enabled = enabled) { Text("قفل روی این", color = if (enabled) K.ice else K.dim, fontSize = 13.sp) }
+            if (r.reached && !live) SmallButton("قفل روی این", enabled = enabled, onClick = onLock)
         }
         if (r.reached) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Metric("پینگ", r.ping?.let { "${it.toInt()}" }, "ms", pingColor(r.ping), Modifier.weight(1f))
                 Metric("لرزش", r.jitter?.let { "${it.toInt()}" }, "ms", jitterColor(r.jitter), Modifier.weight(1f))
                 Metric("افت", r.loss?.let { if (it == 0.0) "0" else "%.0f".format(it) }, "%", lossColor(r.loss), Modifier.weight(1f))
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Metric("آنتن", r.rsrp?.toString(), "dBm", rsrpColor(r.rsrp), Modifier.weight(1f))
                 Metric("کیفیت", r.sinr?.let { "%.0f".format(it) }, "dB", sinrColor(r.sinr), Modifier.weight(1f))
-                Metric("سرعت", r.mbps?.let { if (it >= 10) "${it.toInt()}" else "%.1f".format(it) }, "Mbps", K.ice, Modifier.weight(1f))
+                if (!live) Metric("سرعت", r.mbps?.let { if (it >= 10) "${it.toInt()}" else "%.1f".format(it) }, "Mbps", K.ice, Modifier.weight(1f))
             }
         }
     }
@@ -1322,13 +1350,13 @@ private fun BandCard(r: BandResult, best: Boolean, rank: Int?, enabled: Boolean,
 @Composable
 private fun Metric(label: String, value: String?, unit: String, color: Color, modifier: Modifier) {
     Column(
-        modifier.clip(RoundedCornerShape(12.dp)).background(K.raised).padding(vertical = 8.dp, horizontal = 6.dp),
+        modifier.clip(RoundedCornerShape(10.dp)).background(K.raised).padding(vertical = 7.dp, horizontal = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(label, color = K.dim, fontSize = 11.sp)
         Ltr {
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(value ?: "—", color = if (value == null) K.dim else color, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                Text(value ?: "—", color = if (value == null) K.dim else color, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 if (value != null) Text(" $unit", color = K.dim, fontSize = 10.sp, modifier = Modifier.padding(bottom = 2.dp))
             }
         }
@@ -1464,7 +1492,7 @@ private val STA_CIPHER = listOf("TKIP" to "TKIP", "CCMP" to "AES (CCMP)", "TKIPC
 
 @Composable
 private fun ApStationPage(st: AppState, back: () -> Unit) {
-    var ver by remember { mutableIntStateOf(0) }
+    var ver by rememberSaveable { mutableIntStateOf(0) }
     var edit by remember { mutableStateOf<Hotspot?>(null) }
     var del by remember { mutableStateOf<Hotspot?>(null) }
     var found by remember { mutableStateOf<List<FoundWifi>?>(null) }
@@ -1576,7 +1604,7 @@ private val WEEK = listOf("یکشنبه", "دوشنبه", "سه‌شنبه", "چ
 
 @Composable
 private fun ParentalPage(st: AppState, back: () -> Unit) {
-    var ver by remember { mutableIntStateOf(0) }
+    var ver by rememberSaveable { mutableIntStateOf(0) }
     var addSite by remember { mutableStateOf(false) }
     SubPage("کنترل والدین", back, "برای دستگاه بچه‌ها: در ساعت‌های بسته اینترنت ندارند و فقط سایت‌های فهرست سفید باز می‌شوند.") {
         Load(st, ver, { Triple(childDevices(), devices(), timeLimits()) to whiteSites() }) { (t, sites), _ ->
@@ -1678,7 +1706,7 @@ private fun ParentalPage(st: AppState, back: () -> Unit) {
 
 @Composable
 private fun SdPage(st: AppState, back: () -> Unit) {
-    var ver by remember { mutableIntStateOf(0) }
+    var ver by rememberSaveable { mutableIntStateOf(0) }
     var path by remember { mutableStateOf(SD_BASE) }
     var page by remember { mutableIntStateOf(1) }
     var newFolder by remember { mutableStateOf(false) }

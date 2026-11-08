@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -44,6 +46,9 @@ class AppState(private val app: Application, transport: Transport?) : AndroidVie
 
     /** Open sub-pages, last one on top (the system back button closes it). */
     val pages = mutableStateListOf<String>()
+
+    /** Last result of each `Load` on screen, so a page shows it at once when you come back. */
+    internal val loadCache = HashMap<String, Result<*>>()
 
     var status by mutableStateOf(JSONObject())
     var offline by mutableStateOf(false)
@@ -121,6 +126,7 @@ class AppState(private val app: Application, transport: Transport?) : AndroidVie
         loggedIn = false
         status = JSONObject()
         pages.clear()
+        loadCache.clear()
         tab = Tab.HOME
     }
 
@@ -164,21 +170,26 @@ class AppState(private val app: Application, transport: Transport?) : AndroidVie
         bandResults.clear()
         bandJob = viewModelScope.launch {
             bandTestRunning = true
-            val net = (api.net as? HttpTransport)?.wifiNetwork()
+            stopLive()
+            val http = api.net as? HttpTransport
+            val letGo = http?.holdWifi() ?: {}
             try {
                 bands.forEachIndexed { i, b ->
                     val name = bandName(b)
                     fun step(t: String, part: Float) { bandTestStep = "$name: $t"; bandTestProgress = (i + part) / bands.size }
                     step("قفل کردن مودم روی این باند…", 0f)
-                    if (io { setBands(listOf(b)) }.getOrNull() != true) {
+                    // The answer can get lost when the modem drops for the change; then ask what it has now.
+                    val set = io { setBands(listOf(b)) }.getOrNull() == true ||
+                        (1..5).any { delay(2000); io { bands().second }.getOrNull() == listOf(b) }
+                    if (!set) {
                         bandResults += BandResult(b, false, note = "مودم قفل را قبول نکرد"); return@forEachIndexed
                     }
                     // Wait until the modem says it is on this band and the internet is back (up to 50 s).
                     var reached = false
                     var confirmed = false
-                    for (w in 0 until 50) {
+                    for (w in 0 until 70) {
                         delay(1000)
-                        step("صبر برای وصل شدن (${w + 1} ثانیه)", 0.1f + 0.4f * w / 50)
+                        step("صبر برای وصل شدن (${w + 1} ثانیه)", 0.1f + 0.4f * w / 70)
                         val st = io { get("ppp_status,signalbar") }.getOrNull() ?: continue
                         val res = io { band() }.getOrDefault("")
                         val num = BandProbe.residentNumber(res)
@@ -196,8 +207,9 @@ class AppState(private val app: Application, transport: Transport?) : AndroidVie
                     }
                     fun avg(vararg keys: String): Double? = sig.mapNotNull { j -> keys.firstNotNullOfOrNull { k -> j.optString(k).toDoubleOrNull() } }.takeIf { it.isNotEmpty() }?.average()
                     step("پینگ (۲۰ بار)…", 0.65f)
+                    val net = http?.wifiNetwork()
                     val (ping, jitter, loss) = withContext(Dispatchers.IO) { BandProbe.pingSeries(net) }
-                    val mbps = if (withSpeed) { step("تست سرعت…", 0.85f); withContext(Dispatchers.IO) { BandProbe.speed(net) } } else null
+                    val mbps = if (withSpeed) { step("تست سرعت…", 0.85f); withContext(Dispatchers.IO) { BandProbe.speed(http?.wifiNetwork()) } } else null
                     bandResults += BandResult(
                         b, true,
                         rsrp = avg("lte_rsrp")?.toInt(), sinr = avg("detail_cell_sinr", "sinr", "lte_snr"), rsrq = avg("detail_cell_rsrq", "rsrq"),
@@ -212,7 +224,13 @@ class AppState(private val app: Application, transport: Transport?) : AndroidVie
             } finally {
                 withContext(kotlinx.coroutines.NonCancellable) {
                     bandTestStep = "روشن کردن دوبارهٔ همهٔ باندها…"
-                    io { setBands(restore) }
+                    // Try hard: leaving the modem locked on one band by mistake would be bad.
+                    for (t in 0 until 5) {
+                        if (io { setBands(restore) }.getOrNull() == true) break
+                        delay(3000)
+                        if (io { bands().second }.getOrNull()?.toSet() == restore.toSet()) break
+                    }
+                    letGo()
                     bandTestRunning = false
                     bandTestProgress = 1f
                     if (bandTestStep.startsWith("روشن")) bandTestStep = "تمام شد؛ همهٔ باندها دوباره روشن شدند"
@@ -223,6 +241,61 @@ class AppState(private val app: Application, transport: Transport?) : AndroidVie
     }
 
     fun stopBandTest() { bandJob?.cancel() }
+
+    // ---------------- live measure (no band change) ----------------
+
+    /** Pings and signal per band, gathered while the modem stays on whatever band it picked itself. */
+    class LiveBand(val band: String) {
+        val pings = ArrayDeque<Double?>()
+        var rsrp: Int? = null
+        var sinr: Double? = null
+        var bars: Int? = null
+    }
+
+    val live = mutableStateMapOf<String, LiveBand>()
+    var liveBand by mutableStateOf("")
+    var liveTick by mutableIntStateOf(0)
+    private var liveJob: Job? = null
+
+    /** Every 2 seconds: which band, signal, and one ping through the modem. Nothing on the modem is changed. */
+    fun startLive() {
+        if (liveJob?.isActive == true || bandTestRunning) return
+        liveJob = viewModelScope.launch {
+            val http = api.net as? HttpTransport
+            while (isActive) {
+                val res = io { band() }.getOrDefault("")
+                val num = BandProbe.residentNumber(res)
+                val key = when {
+                    num == null -> ""
+                    BandProbe.isLte(res) -> "LTEB$num"
+                    else -> "WB$num"
+                }
+                val sig = io { get("lte_rsrp,signalbar,detail_cell_sinr,sinr,lte_snr") }.getOrNull()
+                val ping = withContext(Dispatchers.IO) { BandProbe.pingOnce(http?.wifiNetwork()) }
+                if (key.isNotEmpty()) {
+                    val b = live.getOrPut(key) { LiveBand(key) }
+                    b.pings.addLast(ping)
+                    while (b.pings.size > 60) b.pings.removeFirst()
+                    sig?.let { j ->
+                        j.optString("lte_rsrp").toDoubleOrNull()?.let { b.rsrp = it.toInt() }
+                        listOf("detail_cell_sinr", "sinr", "lte_snr").firstNotNullOfOrNull { j.optString(it).toDoubleOrNull() }?.let { b.sinr = it }
+                        j.optString("signalbar").toIntOrNull()?.let { b.bars = it }
+                    }
+                }
+                liveBand = key
+                liveTick++
+                delay(2000)
+            }
+        }
+    }
+
+    fun stopLive() { liveJob?.cancel(); liveJob = null }
+
+    fun liveResult(b: LiveBand): BandResult {
+        val (p, j, l) = BandProbe.summary(b.pings.toList())
+        return BandResult(b.band, true, rsrp = b.rsrp, sinr = b.sinr, bars = b.bars, ping = p, jitter = j, loss = l,
+            note = "${b.pings.size} بار سنجیده شد")
+    }
 
     /** A small change with no spinner and no message (e.g. marking an SMS read). */
     fun quiet(block: ModemApi.() -> Unit) { viewModelScope.launch { io(block) } }

@@ -22,6 +22,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material.icons.filled.UnfoldMore
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -38,9 +44,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Switch
@@ -51,6 +54,8 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.currentCompositeKeyHash
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -152,41 +157,56 @@ fun SubPage(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(Modifier.fillMaxSize().background(K.bg)) {
-        Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "بازگشت", tint = K.text) }
-            Text(title, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = K.text, modifier = Modifier.weight(1f))
+        Row(Modifier.fillMaxWidth().height(52.dp).padding(start = 4.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "بازگشت", tint = K.text, modifier = Modifier.size(22.dp)) }
+            Text(title, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = K.text, maxLines = 1, modifier = Modifier.weight(1f))
             action?.invoke()
         }
+        HorizontalDivider(color = K.line, thickness = 1.dp)
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (help != null) Text(help, color = K.dim, fontSize = 13.sp, lineHeight = 20.sp)
+            if (help != null) Text(help, color = K.dim, fontSize = 12.5.sp, lineHeight = 19.sp)
             content()
             Spacer(Modifier.height(24.dp))
         }
     }
 }
 
-/** Loads something from the modem; shows a spinner, an error with retry, or the content. */
+/**
+ * Loads something from the modem; shows a spinner, an error with retry, or the content.
+ * What was loaded last time is shown at once while the fresh copy comes, so going back to a page
+ * does not flash a spinner and the page stays where it was scrolled.
+ */
 @Composable
 fun <T> Load(st: AppState, key: Any, load: ModemApi.() -> T, content: @Composable (T, () -> Unit) -> Unit) {
+    val ck = "${currentCompositeKeyHash}:$key"
     var version by remember { mutableIntStateOf(0) }
-    val first = remember(key, version) { if (st.eager) runCatching { st.api.load() } else null }
-    val result by produceState(first, key, version) { if (first == null) { value = null; value = st.io(load) } }
-    when (val r = result) {
-        null -> Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = K.blue, strokeWidth = 3.dp)
+    val first = remember(ck, version) { if (st.eager) runCatching { st.api.load() } else null }
+    var got by remember { mutableStateOf<Pair<String, Result<T>>?>(null) }
+    var running by remember { mutableStateOf(false) }
+    LaunchedEffect(ck, version) {
+        if (first != null) return@LaunchedEffect
+        running = true
+        val now = st.io(load)
+        if (now.isSuccess) st.loadCache[ck] = now
+        got = ck to now
+        running = false
+    }
+    @Suppress("UNCHECKED_CAST")
+    val shown: Result<T>? = first ?: got?.takeIf { it.first == ck }?.second ?: st.loadCache[ck] as Result<T>?
+    when {
+        shown == null || (shown.isFailure && running) -> Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = K.blue, strokeWidth = 2.5.dp, modifier = Modifier.size(28.dp))
         }
-        else -> r.fold(
+        else -> shown.fold(
             { content(it) { version++ } },
             {
                 Group {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(st.netError(it), color = K.text)
-                        OutlinedButton(onClick = { version++ }) {
-                            Icon(Icons.Filled.Refresh, null); Spacer(Modifier.width(6.dp)); Text("دوباره امتحان کن")
-                        }
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(st.netError(it), color = K.text, fontSize = 14.sp)
+                        SmallButton("دوباره امتحان کن", Icons.Filled.Refresh) { version++ }
                     }
                 }
             },
@@ -200,28 +220,28 @@ fun <T> Load(st: AppState, key: Any, load: ModemApi.() -> T, content: @Composabl
 fun Group(title: String? = null, footer: String? = null, content: @Composable ColumnScope.() -> Unit) {
     Column {
         if (title != null) Text(
-            title, color = K.ice, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(start = 6.dp, bottom = 8.dp),
+            title, color = K.dim, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
         )
         Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(K.card)
-                .border(BorderStroke(1.dp, K.line), RoundedCornerShape(22.dp)),
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(K.card)
+                .border(BorderStroke(1.dp, K.line), RoundedCornerShape(16.dp)),
         ) { content() }
         if (footer != null) Text(
             footer, color = K.dim, fontSize = 12.sp, lineHeight = 18.sp,
-            modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 8.dp),
+            modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 6.dp),
         )
     }
 }
 
 @Composable
-fun Divider() = HorizontalDivider(color = K.line, thickness = 1.dp, modifier = Modifier.padding(start = 62.dp))
+fun Divider() = HorizontalDivider(color = K.line, thickness = 1.dp, modifier = Modifier.padding(start = 54.dp))
 
 /** A colored square with an icon, the same tile on every row so each place is easy to spot. */
 @Composable
-fun IconTile(icon: ImageVector, tint: Color, size: Int = 36) {
+fun IconTile(icon: ImageVector, tint: Color, size: Int = 28) {
     Box(
-        Modifier.size(size.dp).clip(RoundedCornerShape((size * 0.32f).dp)).background(tint.copy(alpha = 0.16f)),
+        Modifier.size(size.dp).clip(RoundedCornerShape((size * 0.3f).dp)).background(tint.copy(alpha = 0.16f)),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, null, tint = tint, modifier = Modifier.size((size * 0.56f).dp)) }
 }
@@ -229,30 +249,31 @@ fun IconTile(icon: ImageVector, tint: Color, size: Int = 36) {
 @Composable
 fun NavRow(icon: ImageVector, tint: Color, title: String, value: String? = null, enabled: Boolean = true, onClick: (() -> Unit)?) {
     Row(
-        Modifier.fillMaxWidth().clickable(enabled = enabled && onClick != null) { onClick?.invoke() }.padding(horizontal = 14.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth().heightIn(min = 50.dp).clickable(enabled = enabled && onClick != null) { onClick?.invoke() }.padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconTile(icon, if (enabled) tint else K.dim)
         Spacer(Modifier.width(12.dp))
-        Text(title, color = if (enabled) K.text else K.dim, fontSize = 15.sp, modifier = Modifier.weight(1f))
-        if (value != null) Text(value, color = if (onClick == null) K.text else K.dim, fontSize = if (onClick == null) 15.sp else 13.sp, fontWeight = if (onClick == null) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
-        if (onClick != null) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = K.dim)
+        Text(title, color = if (enabled) K.text else K.dim, fontSize = 14.5.sp, modifier = Modifier.weight(1f))
+        if (value != null) Text(value, color = if (onClick == null) K.text else K.dim, fontSize = 13.sp, fontWeight = if (onClick == null) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
+        if (onClick != null) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = K.dim.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
     }
 }
 
 @Composable
 fun SwitchRow(title: String, sub: String? = null, checked: Boolean, enabled: Boolean = true, icon: ImageVector? = null, tint: Color = K.blue, onChange: (Boolean) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(enabled = enabled) { onChange(!checked) }.padding(horizontal = 14.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().heightIn(min = 50.dp).clickable(enabled = enabled) { onChange(!checked) }.padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) { IconTile(icon, tint); Spacer(Modifier.width(12.dp)) }
         Column(Modifier.weight(1f)) {
-            Text(title, color = if (enabled) K.text else K.dim, fontSize = 15.sp)
+            Text(title, color = if (enabled) K.text else K.dim, fontSize = 14.5.sp)
             if (sub != null) Text(sub, color = K.dim, fontSize = 12.sp, lineHeight = 17.sp)
         }
         Spacer(Modifier.width(8.dp))
         Switch(
+            modifier = Modifier.scale(0.82f),
             checked = checked, onCheckedChange = onChange, enabled = enabled,
             colors = SwitchDefaults.colors(
                 checkedTrackColor = K.blue, checkedThumbColor = Color.White,
@@ -268,18 +289,24 @@ fun SwitchRow(title: String, sub: String? = null, checked: Boolean, enabled: Boo
 @Composable
 fun InfoRow(label: String, value: String, valueColor: Color = K.text) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 11.dp),
+        Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = K.dim, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Text(label, color = K.dim, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(8.dp))
         val v = value.ifEmpty { "—" }
-        val t = @Composable { Text(v, color = valueColor, fontSize = 14.sp, fontWeight = FontWeight.Medium) }
+        val t = @Composable { Text(v, color = valueColor, fontSize = 13.5.sp, fontWeight = FontWeight.Medium) }
         // Numbers and addresses read left to right; Persian words keep their own direction.
         if (v.any { it in '\u0600'..'\u06FF' }) t() else Ltr(t)
     }
 }
 
 // ---------------- inputs ----------------
+
+/** The label sits above a slim box, the same for every form in the app. */
+@Composable
+private fun FormLabel(text: String, error: Boolean = false) =
+    Text(text, color = if (error) K.bad else K.dim, fontSize = 12.5.sp, modifier = Modifier.padding(start = 4.dp, bottom = 5.dp))
 
 @Composable
 fun Field(
@@ -296,25 +323,34 @@ fun Field(
     singleLine: Boolean = true,
 ) {
     var show by remember { mutableStateOf(false) }
-    val field = @Composable {
-        OutlinedTextField(
-            value = value, onValueChange = onChange, label = { Text(label) }, singleLine = singleLine,
-            isError = error, enabled = enabled, modifier = modifier.fillMaxWidth(),
-            supportingText = hint?.let { { CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) { Text(it, modifier = Modifier.fillMaxWidth()) } } },
-            shape = RoundedCornerShape(14.dp),
-            keyboardOptions = KeyboardOptions(
-                keyboardType = when { password -> KeyboardType.Password; number -> KeyboardType.Number; ltr -> KeyboardType.Uri; else -> KeyboardType.Text },
-            ),
-            visualTransformation = if (password && !show) PasswordVisualTransformation() else VisualTransformation.None,
-            trailingIcon = if (password) { { IconButton(onClick = { show = !show }) { Icon(if (show) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, null) } } } else null,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = K.blue, unfocusedBorderColor = K.line, focusedLabelColor = K.ice,
-                unfocusedContainerColor = K.card, focusedContainerColor = K.card, disabledContainerColor = K.card,
-                cursorColor = K.blue,
-            ),
-        )
+    var focused by remember { mutableStateOf(false) }
+    Column(modifier.fillMaxWidth()) {
+        FormLabel(label, error)
+        val box = @Composable {
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 46.dp).clip(RoundedCornerShape(12.dp)).background(K.card)
+                    .border(BorderStroke(if (focused) 1.5.dp else 1.dp, when { error -> K.bad; focused -> K.blue; else -> K.line }), RoundedCornerShape(12.dp))
+                    .padding(start = 14.dp, end = if (password) 2.dp else 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BasicTextField(
+                    value = value, onValueChange = onChange, singleLine = singleLine, enabled = enabled,
+                    textStyle = TextStyle(color = if (enabled) K.text else K.dim, fontSize = 14.5.sp, fontFamily = Vazir),
+                    cursorBrush = SolidColor(K.blue),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = when { password -> KeyboardType.Password; number -> KeyboardType.Number; ltr -> KeyboardType.Uri; else -> KeyboardType.Text },
+                    ),
+                    visualTransformation = if (password && !show) PasswordVisualTransformation() else VisualTransformation.None,
+                    modifier = Modifier.weight(1f).padding(vertical = 12.dp).onFocusChanged { focused = it.isFocused },
+                )
+                if (password) IconButton(onClick = { show = !show }, modifier = Modifier.size(40.dp)) {
+                    Icon(if (show) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, null, tint = K.dim, modifier = Modifier.size(19.dp))
+                }
+            }
+        }
+        if (ltr) Ltr(box) else box()
+        if (hint != null) Text(hint, color = if (error) K.bad else K.dim, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(start = 4.dp, top = 4.dp))
     }
-    if (ltr) Ltr(field) else field()
 }
 
 /** Pick one of a few values; opens a list. options = value to label. */
@@ -322,17 +358,17 @@ fun Field(
 fun Choice(label: String, options: List<Pair<String, String>>, value: String, enabled: Boolean = true, onChange: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val shown = options.firstOrNull { it.first == value }?.second ?: value.ifEmpty { "—" }
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.card)
-            .border(BorderStroke(1.dp, K.line), RoundedCornerShape(14.dp))
-            .clickable(enabled = enabled) { open = true }.padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(label, color = K.dim, fontSize = 12.sp)
-            Text(shown, color = if (enabled) K.text else K.dim, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+    Column(Modifier.fillMaxWidth()) {
+        FormLabel(label)
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 46.dp).clip(RoundedCornerShape(12.dp)).background(K.card)
+                .border(BorderStroke(1.dp, K.line), RoundedCornerShape(12.dp))
+                .clickable(enabled = enabled) { open = true }.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(shown, color = if (enabled) K.text else K.dim, fontSize = 14.5.sp, modifier = Modifier.weight(1f))
+            Icon(Icons.Filled.UnfoldMore, null, tint = K.dim, modifier = Modifier.size(18.dp))
         }
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = K.dim)
     }
     if (open) {
         AlertDialog(
@@ -361,23 +397,37 @@ fun Choice(label: String, options: List<Pair<String, String>>, value: String, en
 @Composable
 fun MainButton(text: String, enabled: Boolean = true, color: Color = K.blue, icon: ImageVector? = Icons.Filled.Check, onClick: () -> Unit) {
     Button(
-        onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().height(52.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color.White, disabledContainerColor = K.raised),
+        onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().height(46.dp),
+        shape = RoundedCornerShape(12.dp), contentPadding = PaddingValues(horizontal = 16.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color.White, disabledContainerColor = K.raised, disabledContentColor = K.dim),
     ) {
-        if (icon != null) { Icon(icon, null, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)) }
-        Text(text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        if (icon != null) { Icon(icon, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)) }
+        Text(text, fontWeight = FontWeight.Bold, fontSize = 14.5.sp, maxLines = 1)
     }
 }
 
 @Composable
 fun GhostButton(text: String, icon: ImageVector? = null, color: Color = K.ice, enabled: Boolean = true, onClick: () -> Unit) {
-    OutlinedButton(
-        onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().height(50.dp),
-        shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, K.line),
+    Button(
+        onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().height(44.dp),
+        shape = RoundedCornerShape(12.dp), contentPadding = PaddingValues(horizontal = 16.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = K.raised, contentColor = color, disabledContainerColor = K.card, disabledContentColor = K.dim),
     ) {
-        if (icon != null) { Icon(icon, null, tint = color, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)) }
-        Text(text, color = color, fontWeight = FontWeight.Medium)
+        if (icon != null) { Icon(icon, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)) }
+        Text(text, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 1)
+    }
+}
+
+/** A small button that only takes the room it needs (inside cards). */
+@Composable
+fun SmallButton(text: String, icon: ImageVector? = null, color: Color = K.ice, enabled: Boolean = true, onClick: () -> Unit) {
+    Row(
+        Modifier.height(36.dp).clip(RoundedCornerShape(10.dp)).background(K.raised).clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) { Icon(icon, null, tint = if (enabled) color else K.dim, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)) }
+        Text(text, color = if (enabled) color else K.dim, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -387,7 +437,7 @@ fun Ask(title: String, text: String, yes: String, danger: Boolean = false, onYes
     AlertDialog(
         onDismissRequest = onNo,
         title = { Text(title) },
-        text = { Text(text, lineHeight = 22.sp) },
+        text = { Text(text, fontSize = 14.sp, lineHeight = 22.sp, color = K.text) },
         confirmButton = { TextButton(onClick = { onNo(); onYes() }) { Text(yes, color = if (danger) K.bad else K.ice, fontWeight = FontWeight.Bold) } },
         dismissButton = { TextButton(onClick = onNo) { Text("نه", color = K.dim) } },
         containerColor = K.raised,
@@ -399,7 +449,7 @@ fun Ask(title: String, text: String, yes: String, danger: Boolean = false, onYes
 fun NeedsOffline(st: AppState) {
     if (!st.connected) return
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(K.warn.copy(alpha = 0.12f)).padding(14.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.warn.copy(alpha = 0.10f)).padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("مودم این بخش را فقط وقتی اینترنت قطع است عوض می‌کند. اول از خانه اینترنت را قطع کن.", color = K.warn, fontSize = 13.sp, lineHeight = 20.sp, modifier = Modifier.weight(1f))
@@ -408,5 +458,5 @@ fun NeedsOffline(st: AppState) {
 
 @Composable
 fun Empty(text: String) {
-    Group { Text(text, color = K.dim, modifier = Modifier.padding(18.dp)) }
+    Group { Text(text, color = K.dim, fontSize = 13.5.sp, modifier = Modifier.padding(16.dp)) }
 }
