@@ -278,14 +278,27 @@ class ExtPagesTest {
         assertEquals("1", p["m_EncrypType"]); assertEquals("1", p["m_NoForwarding"]); assertEquals("0", p["m_HideSSID"])
     }
 
-    @Test fun bandsDefaultToAllWhenListIsEmpty() {
+    @Test fun bandsLikeTheRealModem() {
+        // Values read from the owner's modem (get_support_band, set_band_list).
         val m = Recorder(singles = mapOf(
-            "get_support_band" to """{"B1":"1","B3":"1","B7":"0","B20":"1"}""",
+            "get_support_band" to """{"GSM850":"0","WB1":"1","WB2":"0","LTEB1":"1","LTEB2":"0","LTEB3":"1","LTEB7":"1","LTEB12":"1","LTEB20":"1","LTEB40":"1","LTEB66":"0"}""",
             "set_band_list" to """{"set_band_list":""}""",
         ))
         val (all, on) = ModemApi(m).bands()
-        assertEquals(listOf("B1", "B3", "B20"), all); assertEquals(all, on)
-        ModemApi(m).setBands(listOf("B3", "B20")); assertEquals("B3,B20", m.posts.last()["band_list"])
+        // Bands the modem does not list stay (the page only removes "0" ones).
+        assertTrue("LTEB1" in all && "LTEB40" in all && "WB1" in all)
+        assertTrue("LTEB2" !in all && "GSM850" !in all && "LTEB66" !in all)
+        assertEquals(all, on)
+        ModemApi(m).setBands(listOf("LTEB3", "LTEB20")); assertEquals("LTEB3,LTEB20", m.posts.last()["band_list"])
+    }
+
+    @Test fun gsm7LikeThePage() {
+        assertEquals("GSM7_default", Codec.encodeType("Hello 123 @!"))
+        assertEquals("UNICODE", Codec.encodeType("سلام"))
+        assertEquals(1, Codec.smsParts("a".repeat(160)))
+        assertEquals(2, Codec.smsParts("a".repeat(161)))
+        assertEquals(1, Codec.smsParts("س".repeat(70)))
+        assertEquals(2, Codec.smsParts("س".repeat(71)))
     }
 
     @Test fun fiveGhzLetsTheModemPickTheChannel() {

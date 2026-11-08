@@ -89,8 +89,8 @@ private class ShowModem : Transport {
             "site_white_list" -> """{"siteList":[{"id":"1","name":"آپارات","site":"www.aparat.com"}]}"""
             "HTTPSHARE_GETCARD_VALUE" -> """{"sd_card_total_size":"947200","sd_card_avi_space":"612000"}"""
             "websURLFilters" -> """{"websURLFilters":"instagram.com;tiktok.com"}"""
-            "get_support_band" -> """{"LTE_B1":"1","LTE_B3":"1","LTE_B7":"1","LTE_B20":"1","WCDMA_B1":"1"}"""
-            "set_band_list" -> """{"set_band_list":"LTE_B3,LTE_B7"}"""
+            "get_support_band" -> """{"GSM850":"0","GSM900":"0","GSM1800":"0","GSM1900":"0","WB1":"1","WB2":"0","WB3":"0","WB4":"0","WB5":"0","WB8":"0","LTEB1":"1","LTEB2":"0","LTEB3":"1","LTEB4":"0","LTEB5":"0","LTEB6":"0","LTEB7":"1","LTEB8":"0","LTEB12":"1","LTEB13":"0","LTEB17":"0","LTEB18":"0","LTEB19":"0","LTEB20":"1","LTEB25":"0","LTEB26":"0","LTEB27":"0","LTEB28":"0","LTEB29":"0","LTEB34":"0","LTEB38":"0","LTEB39":"0","LTEB40":"1","LTEB41":"0","LTEB66":"0"}"""
+            "set_band_list" -> """{"set_band_list":""}"""
             else -> JSONObject().apply { cmd.split(",").forEach { k -> put(k, v[k] ?: "") } }.toString()
         }
     }

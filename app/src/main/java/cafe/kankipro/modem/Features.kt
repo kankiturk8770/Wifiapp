@@ -496,7 +496,7 @@ fun ModemApi.saveDraft(numbers: List<String>, text: String) = setOk(
     "SAVE_SMS",
     listOf(
         "notCallback" to "true", "SMSMessage" to Codec.ucs2Encode(text), "SMSNumber" to numbers.joinToString(";") + ";",
-        "Index" to "-1", "encode_type" to "UNICODE", "sms_time" to Codec.smsTime(), "draft_group_id" to "",
+        "Index" to "-1", "encode_type" to Codec.encodeType(text), "sms_time" to Codec.smsTime(), "draft_group_id" to "",
     ),
 ) && smsDone(5)
 
@@ -648,15 +648,34 @@ fun ModemApi.saveGuest(ssid: String, pass: String, auth: String, hidden: Boolean
     return setOk("SET_WIFI_SSID2_SETTINGS", p)
 }
 
-/** band_selection: get_support_band is {band: 0/1}; set_band_list "" means all. */
+/** Every band on the modem page (subpg/band_selection.html), in its order: 4G first, then 2G/3G. */
+val ALL_BANDS = listOf(
+    "LTEB1", "LTEB2", "LTEB3", "LTEB4", "LTEB5", "LTEB6", "LTEB7", "LTEB8", "LTEB12", "LTEB13", "LTEB17", "LTEB18", "LTEB19",
+    "LTEB20", "LTEB25", "LTEB26", "LTEB27", "LTEB28", "LTEB29", "LTEB34", "LTEB38", "LTEB39", "LTEB40", "LTEB41", "LTEB66",
+    "GSM850", "GSM900", "GSM1800", "GSM1900", "WB1", "WB2", "WB3", "WB4", "WB5", "WB8",
+)
+
+/** MHz of each band, so a person knows what they turn off. */
+val BAND_MHZ = mapOf(
+    "LTEB1" to "2100", "LTEB2" to "1900", "LTEB3" to "1800", "LTEB4" to "1700/2100", "LTEB5" to "850", "LTEB6" to "850", "LTEB7" to "2600",
+    "LTEB8" to "900", "LTEB12" to "700", "LTEB13" to "700", "LTEB17" to "700", "LTEB18" to "850", "LTEB19" to "850", "LTEB20" to "800",
+    "LTEB25" to "1900", "LTEB26" to "850", "LTEB27" to "800", "LTEB28" to "700", "LTEB29" to "700", "LTEB34" to "2000", "LTEB38" to "2600",
+    "LTEB39" to "1900", "LTEB40" to "2300", "LTEB41" to "2500", "LTEB66" to "1700/2100",
+    "GSM850" to "850", "GSM900" to "900", "GSM1800" to "1800", "GSM1900" to "1900",
+    "WB1" to "2100", "WB2" to "1900", "WB3" to "1800", "WB4" to "1700", "WB5" to "850", "WB8" to "900",
+)
+
+/**
+ * band_selection: get_support_band is {band: "1"/"0"}; a "0" band is removed from the page.
+ * When it is empty the page keeps every band. set_band_list "" means all are on.
+ */
 fun ModemApi.bands(): Pair<List<String>, List<String>> {
     val sup = get("get_support_band", multi = false)
-    // org.json does not keep the modem's order: sort as people read them (B1, B3, B20; LTE before WCDMA).
-    val names = sup.keys().asSequence().filter { k -> sup.s(k) != "0" && k != "result" }.toList()
-        .sortedWith(compareBy({ it.replace(Regex("\\d+\$"), "") }, { Regex("(\\d+)\$").find(it)?.value?.toIntOrNull() ?: 0 }))
+    val names = ALL_BANDS.filter { b -> !sup.has(b) || sup.s(b) != "0" }
     val set = get("set_band_list", multi = false).s("set_band_list").split(",").filter { it.isNotBlank() }
     return names to set.ifEmpty { names }
 }
+
 fun ModemApi.setBands(list: List<String>) = setOk("GOFORM_SET_BAND", listOf("band_list" to list.joinToString(",")))
 
 /** vpn: an L2TP / PPTP client inside the modem. */
@@ -870,7 +889,7 @@ fun ModemApi.sdList(path: String, page: Int): Pair<Int, List<SdFile>>? {
 /** Total and free bytes (the modem counts in 32 KB blocks). */
 fun ModemApi.sdSpace(): Pair<Long, Long>? {
     val d = get("HTTPSHARE_GETCARD_VALUE", multi = false)
-    if (d.s("result") == "no_sdcard") return null
+    if (d.s("result").startsWith("no_sd")) return null
     return (d.s("sd_card_total_size").toLongOrNull() ?: 0) * 32 * 1024 to (d.s("sd_card_avi_space").toLongOrNull() ?: 0) * 32 * 1024
 }
 

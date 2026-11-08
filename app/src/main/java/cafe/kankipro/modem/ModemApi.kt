@@ -144,7 +144,7 @@ class ModemApi(internal val net: Transport) {
                 mac = mac,
                 rx = o.optString("rx"),
                 tx = o.optString("tx"),
-                duration = o.optString("duration"),
+                duration = o.optString("duration").ifEmpty { o.optString("connect_time") },
             )
         }
     }
@@ -217,7 +217,7 @@ class ModemApi(internal val net: Transport) {
             "sms_time" to Codec.smsTime(),
             "MessageBody" to Codec.ucs2Encode(text),
             "ID" to "-1",
-            "encode_type" to "UNICODE",
+            "encode_type" to Codec.encodeType(text),
         ),
     ) && smsDone(4)
 

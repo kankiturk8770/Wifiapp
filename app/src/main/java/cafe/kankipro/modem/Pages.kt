@@ -811,12 +811,14 @@ private fun ContactsPage(st: AppState, back: () -> Unit) {
     var del by remember { mutableStateOf<Contact?>(null) }
     var delAll by remember { mutableStateOf<Int?>(null) }
     var group by remember { mutableStateOf("") }
+    var simRoom by remember { mutableIntStateOf(0) }
     SubPage("دفترچه تلفن", back, action = {
         IconButton(onClick = { edit = Contact("-1", "", "", false, "common") }) { Icon(Icons.Filled.Add, "مخاطب تازه", tint = K.ice) }
     }) {
         Load(st, ver, { Triple(contacts(), runCatching { contactRoom(false) }.getOrDefault(0 to 0), runCatching { contactRoom(true) }.getOrDefault(0 to 0)) }) { (all, dev, sim), _ ->
             if (dev.second > 0) Room(dev.first, dev.second, "جای مخاطب در مودم")
             if (sim.second > 0) Room(sim.first, sim.second, "جای مخاطب در سیم‌کارت")
+            simRoom = sim.second
             Choice("گروه", listOf("" to "همه") + GROUPS + ("sim" to "سیم‌کارت"), group) { group = it }
             val list = when (group) { "" -> all; "sim" -> all.filter { it.onSim }; else -> all.filter { !it.onSim && it.group == group } }
             if (list.isEmpty()) Empty("مخاطبی نیست. با + اضافه کن.")
@@ -859,7 +861,7 @@ private fun ContactsPage(st: AppState, back: () -> Unit) {
             title = { Text(if (isNew) "مخاطب تازه" else "ویرایش مخاطب") },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Segments(listOf("در مودم", "در سیم‌کارت"), if (sim) 1 else 0) { sim = it == 1 }
+                    if (simRoom > 0 || c.onSim) Segments(listOf("در مودم", "در سیم‌کارت"), if (sim) 1 else 0) { sim = it == 1 }
                     Field("اسم", name, { name = it.take(if (sim) 14 else 22) })
                     Field("موبایل", num, { num = phone(it) }, ltr = true, number = true)
                     if (!sim) {
@@ -1094,7 +1096,7 @@ private fun UpdatePage(st: AppState, back: () -> Unit) {
         }
         if (!st.connected) Text("اول اینترنت مودم را وصل کن.", color = K.warn, fontSize = 13.sp)
         if (has) GhostButton("دانلود و نصب", color = K.good) { ask = true }
-        Group(title = "آپدیت با فایل", footer = "فقط فایل .bin مخصوص همین مودم، حداکثر ۶۴ مگابایت. فایل اشتباه می‌تواند مودم را خراب کند. در حین آپدیت مودم را خاموش نکن.") {
+        if (st.extra.s("cstm_webui_local_update") == "1") Group(title = "آپدیت با فایل", footer = "فقط فایل .bin مخصوص همین مودم، حداکثر ۶۴ مگابایت. فایل اشتباه می‌تواند مودم را خراب کند. در حین آپدیت مودم را خاموش نکن.") {
             NavRow(Icons.Filled.Upload, K.warn, "انتخاب فایل و نصب") { pickBin.launch(arrayOf("*/*")) }
         }
         binMsg?.let { Text(it, color = if (it.startsWith("✓")) K.good else K.bad, fontSize = 13.sp) }
@@ -1176,7 +1178,7 @@ private fun GuestPage(st: AppState, back: () -> Unit) {
                 var hidden by remember(w) { mutableStateOf(w.s("m_HideSSID") == "1") }
                 var isolate by remember(w) { mutableStateOf(w.s("m_NoForwarding") == "1") }
                 val maxAll = w.s("MAX_Station_num").toIntOrNull()?.coerceIn(1, 32) ?: 8
-                var max by remember(w) { mutableStateOf(w.s("m_MAX_Access_num").ifEmpty { "5" }) }
+                var max by remember(w) { mutableStateOf(w.s("m_MAX_Access_num").takeIf { (it.toIntOrNull() ?: 0) > 0 } ?: "5") }
                 val ssidOk = ssid.toByteArray().size in 1..32
                 val passOk = mode == "OPEN" || pass.length in 8..63
                 Field("اسم شبکهٔ مهمان", ssid, { ssid = it }, error = !ssidOk)
@@ -1205,14 +1207,22 @@ private fun BandPage(st: AppState, back: () -> Unit) {
         Load(st, 0, { bands() }) { (all, chosen), reload ->
             if (all.isEmpty()) { Empty("مودم فهرست باند نداد."); return@Load }
             val on = remember(chosen) { mutableStateListOf<String>().apply { addAll(chosen) } }
-            Group(title = "${all.size} باند") {
-                all.forEachIndexed { i, b ->
-                    if (i > 0) Divider()
-                    SwitchRow(b, null, b in on) { v -> if (v) on += b else on -= b }
+            fun label(b: String) = when {
+                b.startsWith("LTEB") -> "باند ${b.removePrefix("LTEB")}"
+                b.startsWith("WB") -> "باند ${b.removePrefix("WB")}"
+                else -> "GSM"
+            } + " (${BAND_MHZ[b] ?: "?"} MHz)"
+            listOf("4G" to all.filter { it.startsWith("LTE") }, "3G و 2G" to all.filter { !it.startsWith("LTE") }).forEach { (title, list) ->
+                if (list.isNotEmpty()) Group(title = title) {
+                    list.forEachIndexed { i, b ->
+                        if (i > 0) Divider()
+                        SwitchRow(label(b), null, b in on) { v -> if (v) on += b else on -= b }
+                    }
                 }
             }
             GhostButton("همه") { on.clear(); on.addAll(all) }
             MainButton("ذخیره", enabled = on.isNotEmpty()) { ask = true }
+            if (on.none { it.startsWith("LTE") }) Text("هیچ باند 4G روشن نیست؛ مودم فقط 3G یا 2G می‌گیرد.", color = K.warn, fontSize = 13.sp)
             if (ask) Ask("ذخیره شود؟", "اتصال مودم چند لحظه قطع و دوباره وصل می‌شود.", "ذخیره کن",
                 onYes = { st.run("ذخیره شد", then = reload) { setBands(all.filter { it in on }) } }, onNo = { ask = false })
         }

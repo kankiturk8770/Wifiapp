@@ -554,6 +554,7 @@ private fun WifiMain(st: AppState, w: JSONObject, reload: () -> Unit) {
     var pass by remember(w) { mutableStateOf(w.s("password")) }
     var mode by remember(w) { mutableStateOf(w.s("AuthMode").ifEmpty { "WPA2PSK" }) }
     var hidden by remember(w) { mutableStateOf(w.s("HideSSID") == "1") }
+    var lcd by remember(w) { mutableStateOf(w.s("show_ssid_on_lcd") != "no") }
     val maxAll = w.s("MAX_Station_num").toIntOrNull()?.coerceIn(1, 32) ?: 8
     var max by remember(w) { mutableStateOf(w.s("MAX_Access_num").ifEmpty { "10" }) }
     var ask by remember { mutableStateOf(false) }
@@ -577,14 +578,18 @@ private fun WifiMain(st: AppState, w: JSONObject, reload: () -> Unit) {
         Choice("نوع امنیت", modes, mode) { mode = it }
         if (mode != "OPEN") Field("رمز وای‌فای", pass, { pass = it }, password = true, ltr = true, error = !passOk, hint = "۸ تا ۶۳ حرف")
         Choice("حداکثر دستگاه هم‌زمان", (1..maxAll).map { "$it" to "$it" }, max) { max = it }
-        Group { SwitchRow("مخفی کردن اسم", "در فهرست وای‌فای گوشی‌ها دیده نمی‌شود", hidden) { hidden = it } }
+        Group {
+            SwitchRow("مخفی کردن اسم", "در فهرست وای‌فای گوشی‌ها دیده نمی‌شود", hidden) { hidden = it }
+            Divider()
+            SwitchRow("اسم و رمز روی صفحهٔ مودم", "روی صفحهٔ کوچک خود مودم نشان داده شود", lcd) { lcd = it }
+        }
         val wpsOn = w.s("WscModeOption") == "1"
         if (wpsOn) Text("WPS الان روشن است؛ مودم تا تمام شدنش تنظیم وای‌فای را عوض نمی‌کند.", color = K.warn, fontSize = 13.sp)
         MainButton("ذخیره", enabled = ssidOk && passOk && !wpsOn) { ask = true }
         GhostButton("کد QR وای‌فای", Icons.Filled.QrCode2) { qr = true }
     }
     if (ask) Ask("ذخیره شود؟", "وای‌فای چند ثانیه قطع می‌شود و همهٔ دستگاه‌ها، این گوشی هم، باید دوباره وصل شوند.", "ذخیره کن",
-        onYes = { st.run("ذخیره شد. اگر رمز را عوض کردی، با رمز تازه دوباره وصل شو", then = reload) { saveWifi(ssid, pass, mode, hidden, max, w) } },
+        onYes = { st.run("ذخیره شد. اگر رمز را عوض کردی، با رمز تازه دوباره وصل شو", then = reload) { saveWifi(ssid, pass, mode, hidden, max, JSONObject(w.toString()).put("show_ssid_on_lcd", if (lcd) "yes" else "no")) } },
         onNo = { ask = false })
     if (askOff) Ask("وای‌فای خاموش شود؟", "همهٔ دستگاه‌ها قطع می‌شوند و این برنامه هم دیگر به مودم نمی‌رسد تا وای‌فای را با دکمهٔ خود مودم یا کابل روشن کنی.", "خاموش کن", danger = true,
         onYes = { st.run("وای‌فای خاموش شد", then = reload) { setWifiOn(false, w.s("m_ssid_enable")) } }, onNo = { askOff = false })
@@ -699,7 +704,7 @@ private fun DeviceRow(d: Device, isMe: Boolean, onEdit: () -> Unit, onBlock: () 
                 if (isMe) { Spacer(Modifier.width(6.dp)); Pill("همین گوشی", K.good) }
             }
             Ltr { Text("${d.ip}   ${d.mac.uppercase()}", color = K.dim, fontSize = 12.sp, fontFamily = FontFamily.Monospace) }
-            if (d.duration.isNotEmpty() || d.rx.isNotEmpty()) {
+            if (d.duration.isNotEmpty() && d.duration != "--" || d.rx.isNotEmpty()) {
                 Text(
                     listOfNotNull(
                         d.duration.takeIf { it.isNotEmpty() }?.let { "وصل از ${Codec.duration(it)}" },
@@ -825,7 +830,7 @@ private fun ComposeDialog(st: AppState, c: Compose, done: (Int?) -> Unit) {
                     hint = "برای چند نفر، شماره‌ها را با ; جدا کن")
                 Field("متن", text, { text = it }, singleLine = false, modifier = Modifier.heightIn(min = 110.dp))
                 // UCS-2: 70 letters in one SMS, 67 per part when it is longer.
-                val parts = if (text.length <= 70) 1 else (text.length + 66) / 67
+                val parts = Codec.smsParts(text)
                 Text("${text.length} حرف، $parts پیامک" + if (numbers.size > 1) "، برای ${numbers.size} نفر" else "", color = K.dim, fontSize = 12.sp)
             }
         },
